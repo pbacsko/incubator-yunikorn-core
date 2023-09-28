@@ -1,9 +1,10 @@
 package eventdbwriter
 
 import (
-	"log"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
@@ -43,7 +44,7 @@ func (c *EventCache) AddEvent(appID string, event *si.EventRecord) {
 func (c *EventCache) addEvent(appID string, event *si.EventRecord) {
 	c.events[appID] = append(c.events[appID], event)
 	if event.EventChangeDetail == si.EventRecord_APP_COMPLETED {
-		log.Printf("Application %s completed", appID)
+		GetLogger().Info("Application completed", zap.String("appID", appID))
 		c.completionTime[appID] = time.Now()
 	}
 }
@@ -71,7 +72,8 @@ func (c *EventCache) Start() {
 		for {
 			removed := c.cleanUpOldEntries()
 			if removed > 0 {
-				log.Printf("Event cache: removed %d expired entries", removed)
+				GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
+					removed))
 			}
 			time.Sleep(30 * time.Second)
 		}
@@ -81,7 +83,7 @@ func (c *EventCache) Start() {
 func (c *EventCache) Clear() {
 	c.Lock()
 	defer c.Unlock()
-	log.Println("Clearing event cache")
+	GetLogger().Info("Clearing event cache")
 	c.events = make(map[string][]*si.EventRecord)
 	c.fullHistory = make(map[string]bool)
 	c.completionTime = make(map[string]time.Time)
@@ -94,8 +96,8 @@ func (c *EventCache) cleanUpOldEntries() int {
 	removed := 0
 	for appID, completed := range c.completionTime {
 		if time.Since(completed) > expiry {
-			log.Printf("Removing application %s from the event cache",
-				appID)
+			GetLogger().Info("Removing application from the event cache",
+				zap.String("appID", appID))
 			delete(c.events, appID)
 			delete(c.completionTime, appID)
 			delete(c.fullHistory, appID)

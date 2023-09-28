@@ -2,8 +2,9 @@ package eventdbwriter
 
 import (
 	"encoding/json"
-	"log"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
@@ -28,15 +29,15 @@ func entryFromSI(yunikornID string, eventID uint64, event *si.EventRecord) *Even
 	if event.Resource != nil {
 		r, err := json.Marshal(event.Resource)
 		if err != nil {
-			log.Printf("ERROR: unable to properly marshal resource object %v",
-				event.Resource)
+			GetLogger().Error("Unable to properly marshal resource object",
+				zap.Any("resource", event.Resource))
 		} else {
 			resJson := string(r)
 			if len(resJson) <= maxResourceSize {
 				resource = resJson
 			} else {
-				log.Printf("ERROR: marshalled resource string is too large: %v",
-					event.Resource)
+				GetLogger().Error("Marshalled resource string is too large",
+					zap.Any("resource", event.Resource))
 			}
 		}
 	}
@@ -70,7 +71,8 @@ func siFromEntry(dbEntry EventDBEntry) *si.EventRecord {
 		var res si.Resource
 		err := json.Unmarshal([]byte(dbEntry.Resource), &res)
 		if err != nil {
-			log.Printf("ERROR: Unable to unmarshal resources from database entry: %s", dbEntry.Resource)
+			GetLogger().Error("Unable to unmarshal resources from database entry",
+				zap.String("resource", dbEntry.Resource))
 		} else {
 			event.Resource = &res
 		}

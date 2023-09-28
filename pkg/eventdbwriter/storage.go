@@ -3,9 +3,9 @@ package eventdbwriter
 import (
 	"database/sql"
 	"errors"
-	"log"
 	"sync/atomic"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
@@ -67,7 +67,7 @@ func (s *DBStorage) GetAllEventsForApp(appID string) ([]*si.EventRecord, error) 
 		return s.db.Where("objectID = ? AND yunikorn_id = ?", appID, yunikornID).Find(&result).Error
 	})
 	if err != nil {
-		log.Printf("ERROR: could not read from database: %v", err)
+		GetLogger().Error("Could not read from database", zap.Error(err))
 		return nil, err
 	}
 

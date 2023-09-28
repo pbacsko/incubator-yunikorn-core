@@ -3,8 +3,9 @@ package eventdbwriter
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
+
+	"go.uber.org/zap"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -13,10 +14,11 @@ import (
 func StartEventService(dbInfo DBInfo, yunikornHost string) {
 	storage := createStorage(dbInfo)
 
-	log.Println("Starting event service")
-	log.Printf("Yunikorn host: %s", yunikornHost)
-	log.Printf("Database host: %s, port: %d, name: %s, username: %s", dbInfo.Host,
-		dbInfo.Port, dbInfo.Name, dbInfo.User)
+	GetLogger().Info("Starting event service")
+	GetLogger().Info("Yunikorn host", zap.String("host", yunikornHost))
+	GetLogger().Info("Database properties", zap.String("host", dbInfo.Host),
+		zap.Int("port", dbInfo.Port), zap.String("db name", dbInfo.Name),
+		zap.String("username", dbInfo.User))
 
 	cache := NewEventCache()
 	webservice := NewWebService(cache, storage)
@@ -31,13 +33,14 @@ func createStorage(dbInfo DBInfo) Storage {
 	s := &DBStorage{}
 	db, err := openDBSession(dbInfo)
 	if err != nil {
-		log.Fatalf("Could not create DB session: %v", err)
+		GetLogger().Fatal("Could not create DB session", zap.Error(err))
 		return nil
 	}
 	s.db = db
 	err = db.Migrator().AutoMigrate(&EventDBEntry{})
 	if err != nil {
-		log.Fatalf("DB auto migration failed: %v", err)
+		GetLogger().Fatal("DB auto migration failed", zap.Error(err))
+		return nil
 	}
 
 	return s

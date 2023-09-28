@@ -3,11 +3,11 @@ package eventdbwriter
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	"go.uber.org/zap"
 
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
@@ -31,11 +31,11 @@ func (m *WebService) Start() {
 	router.Handle("GET", "/ws/v1/appevents/:appId", m.GetAppEvents)
 	m.httpServer = &http.Server{Addr: ":9111", Handler: router, ReadHeaderTimeout: time.Second}
 
-	log.Println("Starting web service")
+	GetLogger().Info("Starting web service")
 	go func() {
 		httpError := m.httpServer.ListenAndServe()
 		if httpError != nil && httpError != http.ErrServerClosed {
-			log.Fatal("HTTP serving error", httpError)
+			GetLogger().Fatal("HTTP serving error", zap.Error(httpError))
 		}
 	}()
 }
@@ -50,17 +50,18 @@ func (m *WebService) GetAppEvents(w http.ResponseWriter, _ *http.Request, params
 
 	events := m.cache.GetEvents(appId)
 	if events == nil {
-		log.Printf("Fetching events from backend for application %s", appId)
+		GetLogger().Info("Fetching events from backend for application",
+			zap.String("appID", appId))
 		var err error
 		events, err = m.storage.GetAllEventsForApp(appId)
 		if err != nil {
-			msg := fmt.Sprintf("ERROR: Could not retrieve events from backend storage: %v", err)
-			log.Println(msg)
-			sendError(w, msg)
+			GetLogger().Error("Could not retrieve events from backend storage",
+				zap.Error(err))
+			sendError(w, fmt.Sprintf("ERROR: Could not retrieve events from backend storage: %v", err))
 			return
 		}
 		if len(events) == 0 {
-			log.Printf("No events for application %s", appId)
+			GetLogger().Info("No events for application", zap.String("appID", appId))
 		} else {
 			m.cache.AddEvents(appId, events)
 			m.cache.SetHaveFullHistory(appId)
@@ -71,7 +72,7 @@ func (m *WebService) GetAppEvents(w http.ResponseWriter, _ *http.Request, params
 		Events: events,
 	})
 	if err != nil {
-		log.Printf("ERROR: could not marshall response")
+		GetLogger().Error("Could not marshall response", zap.Error(err))
 	}
 }
 
@@ -81,7 +82,7 @@ func sendError(w http.ResponseWriter, msg string) {
 		Message: msg,
 	})
 	if err != nil {
-		log.Printf("ERROR: could not marshall response")
+		GetLogger().Error("Could not marshall response", zap.Error(err))
 	}
 }
 
