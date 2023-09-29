@@ -67,15 +67,19 @@ func (c *EventCache) GetEvents(appID string) []*si.EventRecord {
 	return c.events[appID]
 }
 
-func (c *EventCache) Start() {
+func (c *EventCache) Start(stop <-chan struct{}) {
 	go func() {
 		for {
-			removed := c.cleanUpOldEntries()
-			if removed > 0 {
-				GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
-					removed))
+			select {
+			case <-stop:
+				return
+			case <-time.After(eventFetchPeriod):
+				removed := c.cleanUpOldEntries()
+				if removed > 0 {
+					GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
+						removed))
+				}
 			}
-			time.Sleep(30 * time.Second)
 		}
 	}()
 }

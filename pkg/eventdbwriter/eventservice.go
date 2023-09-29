@@ -8,10 +8,17 @@ import (
 	"go.uber.org/zap"
 
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-func StartEventService(dbInfo DBInfo, yunikornHost string) {
+type EventService struct {
+	cache  *EventCache
+	web    *WebService
+	writer *EventWriter
+}
+
+func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
 	storage := createStorage(dbInfo)
 
 	GetLogger().Info("Starting event service")
@@ -24,9 +31,17 @@ func StartEventService(dbInfo DBInfo, yunikornHost string) {
 	webservice := NewWebService(cache, storage)
 	writer := NewEventWriter(storage, NewHttpClient(yunikornHost), cache)
 
-	cache.Start()
-	webservice.Start()
-	writer.Start()
+	return &EventService{
+		cache:  cache,
+		web:    webservice,
+		writer: writer,
+	}
+}
+
+func (es *EventService) Start(stop <-chan struct{}) {
+	es.cache.Start(stop)
+	es.web.Start(stop)
+	es.writer.Start(stop)
 }
 
 func createStorage(dbInfo DBInfo) Storage {
@@ -49,15 +64,25 @@ func createStorage(dbInfo DBInfo) Storage {
 func openDBSession(dbInfo DBInfo) (*gorm.DB, error) {
 	dsn := getConnectionString(dbInfo)
 	var db *gorm.DB
-	// set same nanosecond timestamp as used in postgres for time
-	var datetimePrecision = 6
-	cfg := mysql.Config{
-		DSN:                      dsn,
-		DefaultDatetimePrecision: &datetimePrecision,
-	}
 	var err error
-	if db, err = gorm.Open(mysql.New(cfg)); err != nil {
-		return nil, fmt.Errorf("error creating DB session for '%s', error: %w", "mysql", err)
+
+	switch dbInfo.Driver {
+	case MySQL:
+		// set same nanosecond timestamp as used in postgres for time
+		var datetimePrecision = 6
+		cfg := mysql.Config{
+			DSN:                      dsn,
+			DefaultDatetimePrecision: &datetimePrecision,
+		}
+		if db, err = gorm.Open(mysql.New(cfg)); err != nil {
+			return nil, fmt.Errorf("error creating DB session for '%s', error: %w", dbInfo.Driver, err)
+		}
+	case Postgres:
+		if db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{}); err != nil {
+			return nil, fmt.Errorf("error creating DB session for '%s', error: %w", dbInfo.Driver, err)
+		}
+	default:
+		return nil, fmt.Errorf("unrecognized DB driver: %s", dbInfo.Driver)
 	}
 
 	var sqlDB *sql.DB

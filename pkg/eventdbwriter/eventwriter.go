@@ -46,14 +46,18 @@ func (e *EventWriter) getValidStartID() {
 	e.startID = eventDao.LowestID
 }
 
-func (e *EventWriter) Start() {
+func (e *EventWriter) Start(stop <-chan struct{}) {
 	go func() {
 		e.getValidStartID()
 		for {
-			time.Sleep(eventFetchPeriod)
-			err := e.fetchAndPersistEvents()
-			if err != nil {
-				GetLogger().Error("Unable to fetch events from Yunikorn", zap.Error(err))
+			select {
+			case <-stop:
+				return
+			case <-time.After(2 * time.Second):
+				err := e.fetchAndPersistEvents()
+				if err != nil {
+					GetLogger().Error("Unable to fetch events from Yunikorn", zap.Error(err))
+				}
 			}
 		}
 	}()

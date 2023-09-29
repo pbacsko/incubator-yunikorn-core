@@ -11,12 +11,20 @@ import (
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
+type Driver string
+
+const (
+	MySQL    Driver = "mysql"
+	Postgres Driver = "postgres"
+)
+
 type DBInfo struct {
 	User     string
 	Password string
 	Host     string
 	Port     int
 	Name     string
+	Driver   Driver
 }
 
 type Storage interface {

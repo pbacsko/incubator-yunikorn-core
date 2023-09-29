@@ -26,7 +26,7 @@ type ErrorResponse struct {
 	Message string
 }
 
-func (m *WebService) Start() {
+func (m *WebService) Start(stop <-chan struct{}) {
 	router := httprouter.New()
 	router.Handle("GET", "/ws/v1/appevents/:appId", m.GetAppEvents)
 	m.httpServer = &http.Server{Addr: ":9111", Handler: router, ReadHeaderTimeout: time.Second}
@@ -37,6 +37,10 @@ func (m *WebService) Start() {
 		if httpError != nil && httpError != http.ErrServerClosed {
 			GetLogger().Fatal("HTTP serving error", zap.Error(httpError))
 		}
+	}()
+	go func() {
+		<-stop
+		m.httpServer.Close()
 	}()
 }
 
