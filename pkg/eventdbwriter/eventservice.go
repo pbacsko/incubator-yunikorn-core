@@ -17,11 +17,10 @@ type EventService struct {
 	cache  *EventCache
 	web    *WebService
 	writer *EventWriter
-	ctx    context.Context
 }
 
-func CreateEventService(ctx context.Context, dbInfo DBInfo, yunikornHost string) *EventService {
-	storage := createStorage(ctx, dbInfo)
+func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
+	storage := createStorage(dbInfo)
 
 	GetLogger().Info("Starting event service")
 	GetLogger().Info("Yunikorn host", zap.String("host", yunikornHost))
@@ -37,23 +36,22 @@ func CreateEventService(ctx context.Context, dbInfo DBInfo, yunikornHost string)
 		cache:  cache,
 		web:    webservice,
 		writer: writer,
-		ctx:    ctx,
 	}
 }
 
-func (es *EventService) Start() {
-	es.cache.Start(es.ctx)
-	es.web.Start(es.ctx)
-	es.writer.Start(es.ctx)
+func (es *EventService) Start(ctx context.Context) {
+	es.cache.Start(ctx)
+	es.web.Start(ctx)
+	es.writer.Start(ctx)
 }
 
-func createStorage(ctx context.Context, dbInfo DBInfo) Storage {
+func createStorage(dbInfo DBInfo) Storage {
 	db, err := openDBSession(dbInfo)
 	if err != nil {
 		GetLogger().Fatal("Could not create DB session", zap.Error(err))
 		return nil
 	}
-	dbs := NewDBStorage(db, ctx)
+	dbs := NewDBStorage(db)
 	err = db.Migrator().AutoMigrate(&EventDBEntry{})
 	if err != nil {
 		GetLogger().Fatal("DB auto migration failed", zap.Error(err))

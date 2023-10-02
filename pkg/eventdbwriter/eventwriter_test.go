@@ -27,7 +27,7 @@ func TestSimpleEventPersistence(t *testing.T) {
 	}
 	reader := NewEventWriter(mockDB, client, NewEventCache())
 
-	err := reader.fetchAndPersistEvents()
+	err := reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, "yunikornUUID", reader.ykID)
 
@@ -57,7 +57,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 	reader := NewEventWriter(mockDB, client, NewEventCache())
 
 	// first round, two events
-	err := reader.fetchAndPersistEvents()
+	err := reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, "yunikornUUID", reader.ykID)
 
@@ -77,7 +77,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 	client.response.EventRecords = events
 	client.response.LowestID = 2
 	client.response.HighestID = 3
-	err = reader.fetchAndPersistEvents()
+	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 2, len(mockDB.persistenceCalls))
 	call := mockDB.persistenceCalls[1]
@@ -93,7 +93,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 	client.response.EventRecords = nil
 	client.response.LowestID = 0
 	client.response.HighestID = 3
-	err = reader.fetchAndPersistEvents()
+	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 2, len(mockDB.persistenceCalls))
 
@@ -109,7 +109,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 	client.response.HighestID = 4
 	client.response.EventRecords = events
 
-	err = reader.fetchAndPersistEvents()
+	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 3, len(mockDB.persistenceCalls))
 	call = mockDB.persistenceCalls[2]
@@ -143,7 +143,7 @@ func TestDetectYunikornRestart(t *testing.T) {
 			ObjectID:          "app-1"},
 		{TimestampNano: 22, Type: si.EventRecord_APP, ObjectID: "app-1"},
 	}
-	err := reader.fetchAndPersistEvents()
+	err := reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 
 	// next response with a different InstanceUUID
@@ -153,7 +153,7 @@ func TestDetectYunikornRestart(t *testing.T) {
 		InstanceUUID: "yunikornUUID-2",
 		EventRecords: newEvents,
 	}
-	err = reader.fetchAndPersistEvents()
+	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 1, len(cache.events))
 	assert.Equal(t, "yunikornUUID-2", reader.ykID)
@@ -184,7 +184,7 @@ func TestClientFailure(t *testing.T) {
 	reader := NewEventWriter(mockDB, client, cache)
 	client.setFailure(true)
 
-	err := reader.fetchAndPersistEvents()
+	err := reader.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while getting events")
 	assert.Equal(t, 0, len(mockDB.persistenceCalls))
 	assert.Equal(t, 0, len(cache.events))
@@ -207,7 +207,7 @@ func TestPersistenceFailure(t *testing.T) {
 	}
 	reader := NewEventWriter(mockDB, client, cache)
 
-	err := reader.fetchAndPersistEvents()
+	err := reader.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while storing events")
 	assert.Equal(t, 1, len(mockDB.persistenceCalls))
 	assert.Equal(t, 0, len(cache.events))
@@ -271,7 +271,7 @@ func NewMockDB() *MockDB {
 	}
 }
 
-func (ms *MockDB) PersistEvents(startEventID uint64, events []*si.EventRecord) error {
+func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events []*si.EventRecord) error {
 	ms.persistenceCalls = append(ms.persistenceCalls, PersistenceCall{
 		yunikornID:   ms.ykID,
 		startEventID: startEventID,
@@ -285,7 +285,7 @@ func (ms *MockDB) PersistEvents(startEventID uint64, events []*si.EventRecord) e
 	return nil
 }
 
-func (ms *MockDB) GetAllEventsForApp(appID string) ([]*si.EventRecord, error) {
+func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.EventRecord, error) {
 	if ms.getEventsFails {
 		return nil, fmt.Errorf("error while fetching events")
 	}

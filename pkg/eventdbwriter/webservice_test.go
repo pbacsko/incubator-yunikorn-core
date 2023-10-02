@@ -1,6 +1,8 @@
 package eventdbwriter
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +27,7 @@ func TestNoAppID(t *testing.T) {
 
 func TestHistoryNotInCache(t *testing.T) {
 	recorder := httptest.NewRecorder()
+	req := getRequest()
 	cache := NewEventCache()
 	storage := NewMockDB()
 	web := NewWebService(cache, storage)
@@ -34,7 +37,7 @@ func TestHistoryNotInCache(t *testing.T) {
 		{TimestampNano: 234, ObjectID: "app-1"},
 	}
 
-	web.GetAppEvents(recorder, nil, httprouter.Params{
+	web.GetAppEvents(recorder, req, httprouter.Params{
 		{
 			Key:   "appId",
 			Value: "app-1",
@@ -47,11 +50,12 @@ func TestHistoryNotInCache(t *testing.T) {
 
 func TestNoEventsForApp(t *testing.T) {
 	recorder := httptest.NewRecorder()
+	req := getRequest()
 	cache := NewEventCache()
 	storage := NewMockDB()
 	web := NewWebService(cache, storage)
 
-	web.GetAppEvents(recorder, nil, httprouter.Params{
+	web.GetAppEvents(recorder, req, httprouter.Params{
 		{
 			Key:   "appId",
 			Value: "app-1",
@@ -64,6 +68,7 @@ func TestNoEventsForApp(t *testing.T) {
 
 func TestHistoryIsCached(t *testing.T) {
 	recorder := httptest.NewRecorder()
+	req := getRequest()
 	cache := NewEventCache()
 	storage := NewMockDB()
 	web := NewWebService(cache, storage)
@@ -77,7 +82,7 @@ func TestHistoryIsCached(t *testing.T) {
 	cache.fullHistory = map[string]bool{
 		"app-1": true,
 	}
-	web.GetAppEvents(recorder, nil, httprouter.Params{
+	web.GetAppEvents(recorder, req, httprouter.Params{
 		{
 			Key:   "appId",
 			Value: "app-1",
@@ -89,12 +94,13 @@ func TestHistoryIsCached(t *testing.T) {
 
 func TestBackendFailure(t *testing.T) {
 	recorder := httptest.NewRecorder()
+	req := getRequest()
 	cache := NewEventCache()
 	storage := NewMockDB()
 	storage.getEventsFails = true
 	web := NewWebService(cache, storage)
 
-	web.GetAppEvents(recorder, nil, httprouter.Params{
+	web.GetAppEvents(recorder, req, httprouter.Params{
 		{
 			Key:   "appId",
 			Value: "app-1",
@@ -124,4 +130,12 @@ func checkResponse(t *testing.T, expected string, recorder *httptest.ResponseRec
 	n, err := recorder.Result().Body.Read(body)
 	assert.NilError(t, err)
 	assert.Assert(t, strings.Contains(string(body[:n]), expected))
+}
+
+func getRequest() *http.Request {
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "ignore", &bufio.Reader{})
+	if err != nil {
+		panic(err)
+	}
+	return req
 }

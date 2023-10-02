@@ -30,6 +30,10 @@ type ErrorResponse struct {
 func (m *WebService) Start(ctx context.Context) {
 	router := httprouter.New()
 	router.Handle("GET", "/ws/v1/appevents/:appId", m.GetAppEvents)
+	router.Handle("GET", "/ws/v1/appevents/:appId", func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+		r = r.WithContext(ctx)
+		m.GetAppEvents(w, r, params)
+	})
 	m.httpServer = &http.Server{Addr: ":9111", Handler: router, ReadHeaderTimeout: time.Second}
 
 	GetLogger().Info("Starting web service")
@@ -45,7 +49,7 @@ func (m *WebService) Start(ctx context.Context) {
 	}()
 }
 
-func (m *WebService) GetAppEvents(w http.ResponseWriter, _ *http.Request, params httprouter.Params) {
+func (m *WebService) GetAppEvents(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	writeHeaders(w)
 	appId := params.ByName("appId")
 	if appId == "" {
@@ -58,7 +62,7 @@ func (m *WebService) GetAppEvents(w http.ResponseWriter, _ *http.Request, params
 		GetLogger().Info("Fetching events from backend for application",
 			zap.String("appID", appId))
 		var err error
-		events, err = m.storage.GetAllEventsForApp(appId)
+		events, err = m.storage.GetAllEventsForApp(r.Context(), appId)
 		if err != nil {
 			GetLogger().Error("Could not retrieve events from backend storage",
 				zap.Error(err))

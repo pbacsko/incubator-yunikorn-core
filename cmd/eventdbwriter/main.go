@@ -31,8 +31,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	service := eventdbwriter.CreateEventService(ctx, dbInfo, "localhost:9080")
-	service.Start()
+	service := eventdbwriter.CreateEventService(dbInfo, "localhost:9080")
+	service.Start(ctx)
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)

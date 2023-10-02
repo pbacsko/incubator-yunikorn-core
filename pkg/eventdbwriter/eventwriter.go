@@ -67,7 +67,7 @@ func (e *EventWriter) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(2 * time.Second):
-				err := e.fetchAndPersistEvents()
+				err := e.fetchAndPersistEvents(ctx)
 				if err != nil {
 					GetLogger().Error("Unable to fetch events from Yunikorn", zap.Error(err))
 				}
@@ -76,7 +76,7 @@ func (e *EventWriter) Start(ctx context.Context) {
 	}()
 }
 
-func (e *EventWriter) fetchAndPersistEvents() error {
+func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 	events, err := e.client.GetRecentEvents(e.startID)
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func (e *EventWriter) fetchAndPersistEvents() error {
 		return nil
 	}
 
-	err = e.storage.PersistEvents(e.startID, events.EventRecords)
+	err = e.storage.PersistEvents(ctx, e.startID, events.EventRecords)
 	if err != nil {
 		GetLogger().Error("Failed to persist events", zap.Error(err))
 		return err

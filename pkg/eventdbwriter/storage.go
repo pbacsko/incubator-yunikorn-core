@@ -29,21 +29,19 @@ type DBInfo struct {
 }
 
 type Storage interface {
-	PersistEvents(startEventID uint64, events []*si.EventRecord) error
-	GetAllEventsForApp(appID string) ([]*si.EventRecord, error)
+	PersistEvents(ctx context.Context, startEventID uint64, events []*si.EventRecord) error
+	GetAllEventsForApp(ctx context.Context, appID string) ([]*si.EventRecord, error)
 	SetYunikornID(yunikornID string)
 }
 
 type DBStorage struct {
 	db         *gorm.DB
 	yunikornID atomic.Value
-	ctx        context.Context
 }
 
-func NewDBStorage(db *gorm.DB, ctx context.Context) *DBStorage {
+func NewDBStorage(db *gorm.DB) *DBStorage {
 	return &DBStorage{
-		db:  db,
-		ctx: ctx,
+		db: db,
 	}
 }
 
@@ -51,12 +49,12 @@ func (s *DBStorage) SetYunikornID(yunikornID string) {
 	s.yunikornID.Store(yunikornID)
 }
 
-func (s *DBStorage) PersistEvents(startEventID uint64, events []*si.EventRecord) error {
+func (s *DBStorage) PersistEvents(ctx context.Context, startEventID uint64, events []*si.EventRecord) error {
 	yunikornID, ok := s.yunikornID.Load().(string)
 	if !ok {
 		return errors.New("yunikorn instance ID is not set")
 	}
-	err := s.db.WithContext(s.ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		i := startEventID
 		for _, event := range events {
 			txErr := tx.Create(entryFromSI(yunikornID, i, event)).Error
@@ -74,13 +72,13 @@ func (s *DBStorage) PersistEvents(startEventID uint64, events []*si.EventRecord)
 	return err
 }
 
-func (s *DBStorage) GetAllEventsForApp(appID string) ([]*si.EventRecord, error) {
+func (s *DBStorage) GetAllEventsForApp(ctx context.Context, appID string) ([]*si.EventRecord, error) {
 	yunikornID, ok := s.yunikornID.Load().(string)
 	if !ok {
 		return nil, errors.New("yunikorn instance ID is not set")
 	}
 	var result []EventDBEntry
-	err := s.db.WithContext(s.ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return s.db.Where("objectID = ? AND yunikorn_id = ?", appID, yunikornID).Find(&result).Error
 	})
 	if err != nil {
