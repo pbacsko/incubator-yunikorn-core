@@ -1,6 +1,7 @@
 package eventdbwriter
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -221,7 +222,7 @@ func TestGetValidStartID(t *testing.T) {
 	}
 	reader := NewEventWriter(NewMockDB(), client, NewEventCache())
 
-	reader.getValidStartID()
+	reader.getValidStartID(context.Background())
 
 	assert.Equal(t, uint64(12345), reader.startID)
 }
@@ -241,7 +242,7 @@ func TestGetValidStartIDWithFailure(t *testing.T) {
 		client.setFailure(false)
 	}()
 
-	reader.getValidStartID()
+	reader.getValidStartID(context.Background())
 	assert.Equal(t, uint64(12345), reader.startID)
 }
 

@@ -1,12 +1,12 @@
 package eventdbwriter
 
 import (
+	"context"
 	"math"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/apache/yunikorn-core/pkg/webservice/dao"
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
@@ -30,28 +30,41 @@ func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *
 	}
 }
 
-func (e *EventWriter) getValidStartID() {
-	var eventDao *dao.EventRecordDAO
+func (e *EventWriter) getValidStartID(ctx context.Context) {
+	err := e.tryGetValidStartIDOnce()
+	if err == nil {
+		return
+	}
 	for {
-		var err error
-		eventDao, err = e.client.GetRecentEvents(math.MaxUint64)
-		if err != nil {
-			GetLogger().Error("Coult not fetch events, retrying", zap.Error(err))
-			time.Sleep(time.Second)
-			continue
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+			err := e.tryGetValidStartIDOnce()
+			if err == nil {
+				return
+			}
 		}
-		break
+	}
+}
+
+func (e *EventWriter) tryGetValidStartIDOnce() error {
+	eventDao, err := e.client.GetRecentEvents(math.MaxUint64)
+	if err != nil {
+		GetLogger().Error("Coult not fetch events", zap.Error(err))
+		return err
 	}
 	GetLogger().Info("Lowest valid event ID", zap.Uint64("id", eventDao.LowestID))
 	e.startID = eventDao.LowestID
+	return nil
 }
 
-func (e *EventWriter) Start(stop <-chan struct{}) {
+func (e *EventWriter) Start(ctx context.Context) {
 	go func() {
-		e.getValidStartID()
+		e.getValidStartID(ctx)
 		for {
 			select {
-			case <-stop:
+			case <-ctx.Done():
 				return
 			case <-time.After(2 * time.Second):
 				err := e.fetchAndPersistEvents()
@@ -67,6 +80,14 @@ func (e *EventWriter) fetchAndPersistEvents() error {
 	events, err := e.client.GetRecentEvents(e.startID)
 	if err != nil {
 		return err
+	}
+
+	// corner case which can happen during startup
+	if len(events.EventRecords) == 0 && events.LowestID > e.startID {
+		GetLogger().Info("Adjusting startID", zap.Uint64("current", e.startID),
+			zap.Uint64("new", events.LowestID))
+		e.startID = events.LowestID
+		return nil
 	}
 
 	uuid := events.InstanceUUID

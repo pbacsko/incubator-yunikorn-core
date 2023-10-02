@@ -1,6 +1,7 @@
 package eventdbwriter
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"sync/atomic"
@@ -36,6 +37,14 @@ type Storage interface {
 type DBStorage struct {
 	db         *gorm.DB
 	yunikornID atomic.Value
+	ctx        context.Context
+}
+
+func NewDBStorage(db *gorm.DB, ctx context.Context) *DBStorage {
+	return &DBStorage{
+		db:  db,
+		ctx: ctx,
+	}
 }
 
 func (s *DBStorage) SetYunikornID(yunikornID string) {
@@ -47,7 +56,7 @@ func (s *DBStorage) PersistEvents(startEventID uint64, events []*si.EventRecord)
 	if !ok {
 		return errors.New("yunikorn instance ID is not set")
 	}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(s.ctx).Transaction(func(tx *gorm.DB) error {
 		i := startEventID
 		for _, event := range events {
 			txErr := tx.Create(entryFromSI(yunikornID, i, event)).Error
@@ -71,7 +80,7 @@ func (s *DBStorage) GetAllEventsForApp(appID string) ([]*si.EventRecord, error) 
 		return nil, errors.New("yunikorn instance ID is not set")
 	}
 	var result []EventDBEntry
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(s.ctx).Transaction(func(tx *gorm.DB) error {
 		return s.db.Where("objectID = ? AND yunikorn_id = ?", appID, yunikornID).Find(&result).Error
 	})
 	if err != nil {

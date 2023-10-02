@@ -1,6 +1,7 @@
 package eventdbwriter
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -16,10 +17,11 @@ type EventService struct {
 	cache  *EventCache
 	web    *WebService
 	writer *EventWriter
+	ctx    context.Context
 }
 
-func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
-	storage := createStorage(dbInfo)
+func CreateEventService(ctx context.Context, dbInfo DBInfo, yunikornHost string) *EventService {
+	storage := createStorage(ctx, dbInfo)
 
 	GetLogger().Info("Starting event service")
 	GetLogger().Info("Yunikorn host", zap.String("host", yunikornHost))
@@ -35,30 +37,30 @@ func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
 		cache:  cache,
 		web:    webservice,
 		writer: writer,
+		ctx:    ctx,
 	}
 }
 
-func (es *EventService) Start(stop <-chan struct{}) {
-	es.cache.Start(stop)
-	es.web.Start(stop)
-	es.writer.Start(stop)
+func (es *EventService) Start() {
+	es.cache.Start(es.ctx)
+	es.web.Start(es.ctx)
+	es.writer.Start(es.ctx)
 }
 
-func createStorage(dbInfo DBInfo) Storage {
-	s := &DBStorage{}
+func createStorage(ctx context.Context, dbInfo DBInfo) Storage {
 	db, err := openDBSession(dbInfo)
 	if err != nil {
 		GetLogger().Fatal("Could not create DB session", zap.Error(err))
 		return nil
 	}
-	s.db = db
+	dbs := NewDBStorage(db, ctx)
 	err = db.Migrator().AutoMigrate(&EventDBEntry{})
 	if err != nil {
 		GetLogger().Fatal("DB auto migration failed", zap.Error(err))
 		return nil
 	}
 
-	return s
+	return dbs
 }
 
 func openDBSession(dbInfo DBInfo) (*gorm.DB, error) {

@@ -1,6 +1,7 @@
 package eventdbwriter
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -67,11 +68,11 @@ func (c *EventCache) GetEvents(appID string) []*si.EventRecord {
 	return c.events[appID]
 }
 
-func (c *EventCache) Start(stop <-chan struct{}) {
+func (c *EventCache) Start(ctx context.Context) {
 	go func() {
 		for {
 			select {
-			case <-stop:
+			case <-ctx.Done():
 				return
 			case <-time.After(eventFetchPeriod):
 				removed := c.cleanUpOldEntries()

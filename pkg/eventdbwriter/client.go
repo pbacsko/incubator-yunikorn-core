@@ -1,6 +1,7 @@
 package eventdbwriter
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ func NewHttpClient(host string) *HttpClient {
 
 func (h *HttpClient) GetRecentEvents(startID uint64) (*dao.EventRecordDAO, error) {
 	req, err := h.newRequest(startID)
+	req = req.WithContext(context.Background())
 	if err != nil {
 		return nil, err
 	}

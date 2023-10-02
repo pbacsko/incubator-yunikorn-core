@@ -1,6 +1,7 @@
 package eventdbwriter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,7 +27,7 @@ type ErrorResponse struct {
 	Message string
 }
 
-func (m *WebService) Start(stop <-chan struct{}) {
+func (m *WebService) Start(ctx context.Context) {
 	router := httprouter.New()
 	router.Handle("GET", "/ws/v1/appevents/:appId", m.GetAppEvents)
 	m.httpServer = &http.Server{Addr: ":9111", Handler: router, ReadHeaderTimeout: time.Second}
@@ -39,7 +40,7 @@ func (m *WebService) Start(stop <-chan struct{}) {
 		}
 	}()
 	go func() {
-		<-stop
+		<-ctx.Done()
 		m.httpServer.Close()
 	}()
 }

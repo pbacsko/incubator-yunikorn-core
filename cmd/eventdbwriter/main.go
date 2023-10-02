@@ -14,6 +14,7 @@ import (
 	"github.com/apache/yunikorn-core/pkg/eventdbwriter"
 )
 
+const defaultYunikornHost = "yunikorn-service:9080"
 const MySQLPort = 3306
 const PostgresPort = 5432
 
@@ -30,19 +31,18 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	service := eventdbwriter.CreateEventService(dbInfo, "localhost:9080")
-	service.Start(ctx.Done())
+	service := eventdbwriter.CreateEventService(ctx, dbInfo, "localhost:9080")
+	service.Start()
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-	for range signalChan {
-		log.Println("Shutdown signal received, exiting...")
-		cancel()
-	}
+
+	<-signalChan
+	log.Println("Shutdown signal received, exiting...")
 }
 
 func getYunikornHost() string {
-	yunikornHost := "yunikorn-service:9080"
+	yunikornHost := defaultYunikornHost
 	if os.Getenv("YUNIKORN_HOSTNAME") != "" {
 		yunikornHost = os.Getenv("YUNIKORN_HOSTNAME")
 		eventdbwriter.GetLogger().Info("Found YUNIKORN_HOSTNAME variable, overriding default",
@@ -103,7 +103,7 @@ func getDBInfo() eventdbwriter.DBInfo {
 		port, err = strconv.Atoi(portEnv)
 		if err != nil {
 			eventdbwriter.GetLogger().Fatal("Illegal value for EVENT_DB_PORT",
-				zap.String("portEnv", portEnv))
+				zap.String("value", portEnv))
 		}
 	}
 
