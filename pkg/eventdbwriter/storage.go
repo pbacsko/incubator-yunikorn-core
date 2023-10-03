@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -32,6 +33,7 @@ type Storage interface {
 	PersistEvents(ctx context.Context, startEventID uint64, events []*si.EventRecord) error
 	GetAllEventsForApp(ctx context.Context, appID string) ([]*si.EventRecord, error)
 	SetYunikornID(yunikornID string)
+	RemoveOldEntries(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 type DBStorage struct {
@@ -70,6 +72,17 @@ func (s *DBStorage) PersistEvents(ctx context.Context, startEventID uint64, even
 	})
 
 	return err
+}
+
+func (s *DBStorage) RemoveOldEntries(ctx context.Context, cutoff time.Time) (int64, error) {
+	var rowsAffected int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("time < ?", cutoff).Delete(&EventDBEntry{})
+		rowsAffected = result.RowsAffected
+		return result.Error
+	})
+
+	return rowsAffected, err
 }
 
 func (s *DBStorage) GetAllEventsForApp(ctx context.Context, appID string) ([]*si.EventRecord, error) {

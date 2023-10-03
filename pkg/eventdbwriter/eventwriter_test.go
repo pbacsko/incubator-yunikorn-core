@@ -252,13 +252,20 @@ type PersistenceCall struct {
 	events       []*si.EventRecord
 }
 
+type RemoveCall struct {
+	cutoff time.Time
+}
+
 type MockDB struct {
 	events           []*si.EventRecord
 	persistenceCalls []PersistenceCall
+	removeCalls      []RemoveCall
+	numRemoved       int64
 	ykID             string
 
 	persistFails   bool
 	getEventsFails bool
+	removeFails    bool
 }
 
 func (ms *MockDB) SetYunikornID(yunikornID string) {
@@ -298,6 +305,18 @@ func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.Eve
 	}
 
 	return result, nil
+}
+
+func (ms *MockDB) RemoveOldEntries(_ context.Context, cutoff time.Time) (int64, error) {
+	ms.removeCalls = append(ms.removeCalls, RemoveCall{
+		cutoff: cutoff,
+	})
+
+	if ms.removeFails {
+		return 0, fmt.Errorf("error while removing records")
+	}
+
+	return ms.numRemoved, nil
 }
 
 type MockClient struct {

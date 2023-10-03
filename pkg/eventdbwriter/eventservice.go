@@ -14,9 +14,10 @@ import (
 )
 
 type EventService struct {
-	cache  *EventCache
-	web    *WebService
-	writer *EventWriter
+	cache   *EventCache
+	web     *WebService
+	writer  *EventWriter
+	cleaner *DBCleaner
 }
 
 func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
@@ -31,11 +32,15 @@ func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
 	cache := NewEventCache()
 	webservice := NewWebService(cache, storage)
 	writer := NewEventWriter(storage, NewHttpClient(yunikornHost), cache)
+	cleaner := &DBCleaner{
+		storage: storage,
+	}
 
 	return &EventService{
-		cache:  cache,
-		web:    webservice,
-		writer: writer,
+		cache:   cache,
+		web:     webservice,
+		writer:  writer,
+		cleaner: cleaner,
 	}
 }
 
@@ -43,6 +48,7 @@ func (es *EventService) Start(ctx context.Context) {
 	es.cache.Start(ctx)
 	es.web.Start(ctx)
 	es.writer.Start(ctx)
+	es.cleaner.Start(ctx)
 }
 
 func createStorage(dbInfo DBInfo) Storage {

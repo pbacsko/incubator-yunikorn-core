@@ -75,10 +75,10 @@ func (c *EventCache) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(eventFetchPeriod):
-				removed := c.cleanUpOldEntries()
-				if removed > 0 {
+				numRemoved := c.cleanUpOldEntries()
+				if numRemoved > 0 {
 					GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
-						removed))
+						numRemoved))
 				}
 			}
 		}

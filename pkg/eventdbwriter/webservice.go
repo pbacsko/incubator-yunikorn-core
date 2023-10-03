@@ -29,7 +29,6 @@ type ErrorResponse struct {
 
 func (m *WebService) Start(ctx context.Context) {
 	router := httprouter.New()
-	router.Handle("GET", "/ws/v1/appevents/:appId", m.GetAppEvents)
 	router.Handle("GET", "/ws/v1/appevents/:appId", func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 		r = r.WithContext(ctx)
 		m.GetAppEvents(w, r, params)
