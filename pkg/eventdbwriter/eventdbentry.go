@@ -16,7 +16,7 @@ type EventDBEntry struct {
 	EventID      uint64    `gorm:"column:event_id;primarykey;not null"`
 	Type         int32     `gorm:"column:type;not null"`
 	ObjectID     string    `gorm:"column:objectID;not null;size:64"`
-	ReferenceID  string    `gorm:"column:referenceID;not null;size:64"`
+	ReferenceID  string    `gorm:"column:referenceID;size:64"`
 	Message      string    `gorm:"column:message;size:64"`
 	Timestamp    time.Time `gorm:"column:time;not null"`
 	ChangeType   int32     `gorm:"column:changeType;not null"`
