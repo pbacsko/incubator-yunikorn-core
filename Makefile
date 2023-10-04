@@ -55,12 +55,19 @@ RACE=-race
 #GOOS=darwin
 #GOARCH=amd64
 
+OUTPUT=build
+DOCKER_DIR=${OUTPUT}/docker
+
 ifeq ($(HOST_ARCH),)
 HOST_ARCH := $(shell uname -m)
 endif
 
 # Kernel (OS) Name
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+
+ifeq ($(VERSION),)
+VERSION := latest
+endif
 
 # Allow architecture to be overwritten
 ifeq ($(HOST_ARCH),)
@@ -101,6 +108,34 @@ GOLANGCI_LINT_VERSION=1.54.2
 GOLANGCI_LINT_BIN=$(TOOLS_DIR)/golangci-lint
 GOLANGCI_LINT_ARCHIVE=golangci-lint-$(GOLANGCI_LINT_VERSION)-$(OS)-$(EXEC_ARCH).tar.gz
 GOLANGCI_LINT_ARCHIVEBASE=golangci-lint-$(GOLANGCI_LINT_VERSION)-$(OS)-$(EXEC_ARCH)
+
+# Allow architecture to be overwritten
+ifeq ($(HOST_ARCH),)
+HOST_ARCH := $(shell uname -m)
+endif
+
+ifeq (x86_64, $(HOST_ARCH))
+EXEC_ARCH := amd64
+DOCKER_ARCH := amd64
+else ifeq (i386, $(HOST_ARCH))
+EXEC_ARCH := 386
+DOCKER_ARCH := i386
+else ifneq (,$(filter $(HOST_ARCH), arm64 aarch64))
+EXEC_ARCH := arm64
+DOCKER_ARCH := arm64
+else ifeq (armv7l, $(HOST_ARCH))
+EXEC_ARCH := arm
+DOCKER_ARCH := arm32v7
+else
+$(info Unknown architecture "${HOST_ARCH}" defaulting to: amd64)
+EXEC_ARCH := amd64
+DOCKER_ARCH := amd64
+endif
+
+
+ifeq ($(EVENTDBWRITER_TAG),)
+EVENTDBWRITER_TAG := $(REGISTRY)/yunikorn:eventdbwriter-$(DOCKER_ARCH)-$(VERSION)
+endif
 
 all:
 	$(MAKE) -C $(dir $(BASE_DIR)) build
@@ -194,6 +229,25 @@ build/queueconfigchecker: go.mod go.sum $(shell find cmd pkg)
 	@mkdir -p build
 	"$(GO)" build $(RACE) -a -ldflags '-extldflags "-static"' -o build/queueconfigchecker ./cmd/queueconfigchecker
 
+.PHONY: build/eventdbwriter
+build/eventdbwriter:
+	@echo "building eventdbwriter"
+	@mkdir -p build
+	"$(GO)" build $(RACE) -a -ldflags '-extldflags "-static"' -o build/eventdbwriter ./cmd/eventdbwriter
+
+.PHONY: eventdbwriter_image
+eventdbwriter_image: build/eventdbwriter
+	@echo "building event DB writer docker image"
+	@rm -rf "$(DOCKER_DIR)/eventdbwriter"
+	@mkdir -p "$(DOCKER_DIR)/eventdbwriter"
+	@cp -a "docker/eventdbwriter/." "$(DOCKER_DIR)/eventdbwriter/."
+	@cp "build/eventdbwriter" "$(DOCKER_DIR)/eventdbwriter/."
+	DOCKER_BUILDKIT=1 docker build \
+	"$(DOCKER_DIR)/eventdbwriter" \
+	-t "$(EVENTDBWRITER_TAG)" \
+	--platform "linux/${DOCKER_ARCH}" \
+	--label "Version=${VERSION}" \
+	${QUIET}
 # Build binaries for dev and test
 .PHONY: build
 build: commands
