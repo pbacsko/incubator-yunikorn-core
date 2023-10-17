@@ -187,14 +187,11 @@ func TestGetValidStartID(t *testing.T) {
 }
 
 func TestGetValidStartIDWithFailure(t *testing.T) {
-	startIdFetchPeriod = 10 * time.Millisecond
-	defer func() {
-		startIdFetchPeriod = defaultStartIDFetchPeriod
-	}()
 	client := &MockClient{}
 	client.setContents("yunikornUUID", nil, 12345, 222222)
 	client.setFailure(true)
 	writer := NewEventWriter(NewMockDB(), client, NewEventCache())
+	writer.idFetchRetryWait = 10 * time.Millisecond
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -206,10 +203,6 @@ func TestGetValidStartIDWithFailure(t *testing.T) {
 }
 
 func TestEventPersistenceBackground(t *testing.T) {
-	eventFetchPeriod = 10 * time.Millisecond
-	defer func() {
-		eventFetchPeriod = defaultFetchPeriod
-	}()
 	mockDB := NewMockDB()
 	client := &MockClient{}
 	events := []*si.EventRecord{
@@ -218,6 +211,7 @@ func TestEventPersistenceBackground(t *testing.T) {
 	}
 	client.setContents("yunikornUUID", events, 3, 4)
 	writer := NewEventWriter(mockDB, client, NewEventCache())
+	writer.eventFetchPeriod = 10 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	writer.Start(ctx)
@@ -280,4 +274,21 @@ func TestEventPersistenceBackground(t *testing.T) {
 	persistence = mockDB.getPersistenceCalls()
 	assert.Equal(t, 3, len(persistence))
 	assert.Equal(t, uint64(2), writer.startID.Load())
+}
+
+func TestGetValidStartIDCancelPropagation(t *testing.T) {
+	client := &MockClient{}
+	mockDB := NewMockDB()
+	client.setFailure(true)
+	writer := NewEventWriter(mockDB, client, NewEventCache())
+	writer.idFetchRetryWait = 10 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	writer.Start(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	numCalls := client.getNumCalls()
+	assert.Assert(t, numCalls >= 8 && numCalls <= 11, "expected to have 8-11 client calls, got %d", numCalls)
 }

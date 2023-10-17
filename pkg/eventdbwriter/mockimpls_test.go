@@ -146,11 +146,12 @@ func (ms *MockDB) getYunikornID() string {
 }
 
 type MockClient struct {
-	failure bool
-	events  []*si.EventRecord
-	low     uint64
-	high    uint64
-	ykID    string
+	failure  bool
+	numCalls int
+	events   []*si.EventRecord
+	low      uint64
+	high     uint64
+	ykID     string
 
 	sync.Mutex
 }
@@ -159,6 +160,7 @@ func (mc *MockClient) GetRecentEvents(start uint64) (*dao.EventRecordDAO, error)
 	mc.Lock()
 	defer mc.Unlock()
 
+	mc.numCalls++
 	if mc.failure {
 		return nil, fmt.Errorf("error while getting events")
 	}
@@ -208,4 +210,10 @@ func (mc *MockClient) setContents(ykID string, events []*si.EventRecord, low, hi
 	mc.ykID = ykID
 	mc.low = low
 	mc.high = high
+}
+
+func (mc *MockClient) getNumCalls() int {
+	mc.Lock()
+	defer mc.Unlock()
+	return mc.numCalls
 }

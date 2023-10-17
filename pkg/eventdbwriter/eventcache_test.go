@@ -86,7 +86,7 @@ func TestCompletedAppsCleanup(t *testing.T) {
 }
 
 func TestEventCacheBackground(t *testing.T) {
-	expiry = 100 * time.Millisecond
+	expiry = 10 * time.Millisecond
 	defer func() {
 		expiry = defaultExpiry
 	}()
@@ -98,13 +98,13 @@ func TestEventCacheBackground(t *testing.T) {
 	cache.SetHaveFullHistory("app-1")
 
 	// check that item is still in the cache
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, 1, len(cache.GetEvents("app-1")))
 
 	// add completion event & check removal
 	cache.AddEvent("app-1", &si.EventRecord{TimestampNano: 1,
 		EventChangeDetail: si.EventRecord_APP_COMPLETED})
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, 0, len(cache.GetEvents("app-1")))
 
 	// check cancellation
@@ -113,6 +113,6 @@ func TestEventCacheBackground(t *testing.T) {
 	cache.AddEvent("app-2", &si.EventRecord{TimestampNano: 0})
 	cache.AddEvent("app-2", &si.EventRecord{TimestampNano: 1,
 		EventChangeDetail: si.EventRecord_APP_COMPLETED})
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, 2, len(cache.GetEvents("app-2")))
 }

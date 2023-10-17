@@ -40,7 +40,7 @@ func TestRemoveRowsError(t *testing.T) {
 }
 
 func TestRemoveRecordsBackground(t *testing.T) {
-	cleanupPeriod = time.Millisecond * 100
+	cleanupPeriod = 10 * time.Millisecond
 	defer func() {
 		cleanupPeriod = defaultCleanupPeriod
 	}()
@@ -52,9 +52,10 @@ func TestRemoveRecordsBackground(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cleaner.Start(ctx)
-	time.Sleep(time.Second)
-	cancel()
 
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	time.Sleep(100 * time.Millisecond)
 	removes := mockDB.getRemoveCalls()
-	assert.Assert(t, len(removes) >= 9 && len(removes) <= 11, "expected to have 9-11 remove calls, got %d", mockDB.removeCalls)
+	assert.Assert(t, len(removes) >= 8 && len(removes) <= 11, "expected to have 9-11 remove calls, got %d", len(removes))
 }

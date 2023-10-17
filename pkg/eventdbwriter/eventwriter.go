@@ -14,9 +14,6 @@ import (
 const defaultFetchPeriod = 2 * time.Second
 const defaultStartIDFetchPeriod = time.Second
 
-var eventFetchPeriod = defaultFetchPeriod
-var startIdFetchPeriod = defaultStartIDFetchPeriod
-
 // EventWriter periodically retrieves events from Yunikorn and persists them by using
 // the underlying storage object.
 type EventWriter struct {
@@ -25,13 +22,18 @@ type EventWriter struct {
 	cache   *EventCache
 	ykID    string
 	startID atomic.Uint64
+
+	eventFetchPeriod time.Duration
+	idFetchRetryWait time.Duration
 }
 
 func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *EventWriter {
 	return &EventWriter{
-		storage: storage,
-		client:  client,
-		cache:   cache,
+		storage:          storage,
+		client:           client,
+		cache:            cache,
+		eventFetchPeriod: defaultFetchPeriod,
+		idFetchRetryWait: defaultStartIDFetchPeriod,
 	}
 }
 
@@ -44,7 +46,7 @@ func (e *EventWriter) getValidStartID(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(startIdFetchPeriod):
+		case <-time.After(e.idFetchRetryWait):
 			err := e.tryGetValidStartIDOnce()
 			if err == nil {
 				return
@@ -65,20 +67,20 @@ func (e *EventWriter) tryGetValidStartIDOnce() error {
 }
 
 func (e *EventWriter) Start(ctx context.Context) {
-	go func(period time.Duration) {
+	go func() {
 		e.getValidStartID(ctx)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(period):
+			case <-time.After(e.eventFetchPeriod):
 				err := e.fetchAndPersistEvents(ctx)
 				if err != nil {
 					GetLogger().Error("Unable to fetch events from Yunikorn", zap.Error(err))
 				}
 			}
 		}
-	}(eventFetchPeriod)
+	}()
 }
 
 func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
