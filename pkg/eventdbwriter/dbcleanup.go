@@ -9,6 +9,7 @@ import (
 
 const defaultCleanupPeriod = time.Hour
 
+// DBCleaner Peforms regular cleanup on the database by removing entries periodically.
 type DBCleaner struct {
 	storage       Storage
 	cleanupPeriod time.Duration
@@ -20,6 +21,7 @@ func NewDBCleaner(storage Storage) *DBCleaner {
 		cleanupPeriod: defaultCleanupPeriod,
 	}
 }
+
 func (c *DBCleaner) Start(ctx context.Context) {
 	go func() {
 		for {

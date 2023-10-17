@@ -11,6 +11,7 @@ import (
 
 const maxResourceSize = 1024
 
+// EventDBEntry Database row object for GORM
 type EventDBEntry struct {
 	YunikornID   string    `gorm:"column:yunikorn_id;primarykey;size:64"`
 	EventID      uint64    `gorm:"column:event_id;primarykey;not null"`

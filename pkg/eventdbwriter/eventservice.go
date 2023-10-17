@@ -13,6 +13,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// EventService service which constantly persists events generated inside Yunikorn.
+// Event objects are periodically retrieved & stored in a backend DB.
+// A new REST API is exposed for more sophisticated queries.
 type EventService struct {
 	cache   *EventCache
 	web     *WebService
