@@ -62,6 +62,7 @@ func TestDetectAppCompletion(t *testing.T) {
 
 func TestCompletedAppsCleanup(t *testing.T) {
 	cache := NewEventCache()
+	cache.expiry = 0
 	cache.AddEvents("app-1", []*si.EventRecord{
 		{TimestampNano: 0},
 		{TimestampNano: 1, EventChangeDetail: si.EventRecord_APP_COMPLETED},
@@ -74,10 +75,6 @@ func TestCompletedAppsCleanup(t *testing.T) {
 	})
 	assert.Equal(t, 2, len(cache.completionTime))
 
-	expiry = 0
-	defer func() {
-		expiry = 15 * time.Minute
-	}()
 	cnt := cache.cleanUpOldEntries()
 	assert.Equal(t, 2, cnt)
 	assert.Equal(t, 0, len(cache.fullHistory))
@@ -86,11 +83,8 @@ func TestCompletedAppsCleanup(t *testing.T) {
 }
 
 func TestEventCacheBackground(t *testing.T) {
-	expiry = 10 * time.Millisecond
-	defer func() {
-		expiry = defaultExpiry
-	}()
 	cache := NewEventCache()
+	cache.expiry = 10 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cache.Start(ctx)

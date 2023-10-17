@@ -12,14 +12,13 @@ import (
 
 const defaultExpiry = 15 * time.Minute
 
-var expiry = defaultExpiry
-
 // EventCache stores application events to speed up REST queries.
 // Completed applications are removed after 15 minutes.
 type EventCache struct {
 	events         map[string][]*si.EventRecord // events per app
 	fullHistory    map[string]bool              // whether we have a full history for an app
 	completionTime map[string]time.Time         // completion time per app
+	expiry         time.Duration
 
 	sync.Mutex
 }
@@ -29,6 +28,7 @@ func NewEventCache() *EventCache {
 		events:         make(map[string][]*si.EventRecord),
 		fullHistory:    make(map[string]bool),
 		completionTime: make(map[string]time.Time),
+		expiry:         defaultExpiry,
 	}
 }
 
@@ -71,12 +71,12 @@ func (c *EventCache) GetEvents(appID string) []*si.EventRecord {
 }
 
 func (c *EventCache) Start(ctx context.Context) {
-	go func(period time.Duration) {
+	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(period):
+			case <-time.After(c.expiry):
 				numRemoved := c.cleanUpOldEntries()
 				if numRemoved > 0 {
 					GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
@@ -84,7 +84,7 @@ func (c *EventCache) Start(ctx context.Context) {
 				}
 			}
 		}
-	}(expiry)
+	}()
 }
 
 func (c *EventCache) Clear() {
@@ -102,7 +102,7 @@ func (c *EventCache) cleanUpOldEntries() int {
 
 	removed := 0
 	for appID, completed := range c.completionTime {
-		if time.Since(completed) > expiry {
+		if time.Since(completed) > c.expiry {
 			GetLogger().Info("Removing application from the event cache",
 				zap.String("appID", appID))
 			delete(c.events, appID)
