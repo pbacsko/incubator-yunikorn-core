@@ -93,13 +93,19 @@ func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 	}
 
 	uuid := events.InstanceUUID
+	e.storage.SetYunikornID(uuid)
+	// Restart detection
+	//
+	// No matter if we have new events or not, we need to detect the lowest id again,
+	// so just do some bookkeeping and collect events in the next cycle.
 	if e.ykID != "" && e.ykID != uuid {
 		GetLogger().Info("Yunikorn restart detected",
 			zap.String("last uuid", e.ykID), zap.String("new uuid", uuid))
 		e.cache.Clear()
-		e.startID = events.LowestID // expected to be "0"
+		e.ykID = uuid
+		e.getValidStartID(ctx)
+		return nil
 	}
-	e.storage.SetYunikornID(uuid)
 	e.ykID = uuid
 
 	if len(events.EventRecords) == 0 {

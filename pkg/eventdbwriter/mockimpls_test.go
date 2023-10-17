@@ -146,9 +146,12 @@ func (ms *MockDB) getYunikornID() string {
 }
 
 type MockClient struct {
-	failure  bool
-	response *dao.EventRecordDAO
-	events   []*si.EventRecord
+	failure bool
+	events  []*si.EventRecord
+	low     uint64
+	high    uint64
+	ykID    string
+
 	sync.Mutex
 }
 
@@ -160,7 +163,36 @@ func (mc *MockClient) GetRecentEvents(start uint64) (*dao.EventRecordDAO, error)
 		return nil, fmt.Errorf("error while getting events")
 	}
 
-	return mc.response, nil
+	var filtered []*si.EventRecord
+	id := mc.low
+	var responseLow uint64
+	for _, e := range mc.events {
+		if id >= start {
+			filtered = append(filtered, e)
+			if len(filtered) == 1 {
+				responseLow = id
+			}
+		}
+		id++
+	}
+
+	if len(filtered) == 0 {
+		return &dao.EventRecordDAO{
+			InstanceUUID: mc.ykID,
+			LowestID:     mc.low,
+			HighestID:    mc.high,
+		}, nil
+	}
+
+	lowest := responseLow
+	highest := id - 1
+
+	return &dao.EventRecordDAO{
+		InstanceUUID: mc.ykID,
+		LowestID:     lowest,
+		HighestID:    highest,
+		EventRecords: filtered,
+	}, nil
 }
 
 func (mc *MockClient) setFailure(b bool) {
@@ -169,8 +201,11 @@ func (mc *MockClient) setFailure(b bool) {
 	mc.failure = b
 }
 
-func (mc *MockClient) setResponse(r *dao.EventRecordDAO) {
+func (mc *MockClient) setContents(ykID string, events []*si.EventRecord, low, high uint64) {
 	mc.Lock()
 	defer mc.Unlock()
-	mc.response = r
+	mc.events = events
+	mc.ykID = ykID
+	mc.low = low
+	mc.high = high
 }

@@ -7,23 +7,18 @@ import (
 
 	"gotest.tools/v3/assert"
 
-	"github.com/apache/yunikorn-core/pkg/webservice/dao"
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
 func TestSimpleEventPersistence(t *testing.T) {
 	mockDB := NewMockDB()
 	client := &MockClient{}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    1,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: []*si.EventRecord{
-			{TimestampNano: 100, ObjectID: "app-1"},
-			{TimestampNano: 200, ObjectID: "app-1"},
-		},
-	})
+	client.setContents("yunikornUUID", []*si.EventRecord{
+		{TimestampNano: 100, ObjectID: "app-1"},
+		{TimestampNano: 200, ObjectID: "app-1"},
+	}, 0, 1)
 	reader := NewEventWriter(mockDB, client, NewEventCache())
+	reader.startID = 0
 
 	err := reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
@@ -46,12 +41,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 		{TimestampNano: 100, ObjectID: "app-1"},
 		{TimestampNano: 200, ObjectID: "app-1"},
 	}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    1,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: events,
-	})
+	client.setContents("yunikornUUID", events, 0, 1)
 	reader := NewEventWriter(mockDB, client, NewEventCache())
 
 	// first round, two events
@@ -60,24 +50,19 @@ func TestPersistMultipleRounds(t *testing.T) {
 	assert.Equal(t, "yunikornUUID", reader.ykID)
 
 	// second round, two new events (4 in total)
-	events[0] = &si.EventRecord{
+	events = append(events, &si.EventRecord{
 		TimestampNano:     300,
 		Type:              si.EventRecord_APP,
 		EventChangeType:   si.EventRecord_SET,
 		EventChangeDetail: si.EventRecord_APP_RUNNING,
-		ObjectID:          "app-1"}
-	events[1] = &si.EventRecord{
+		ObjectID:          "app-1"})
+	events = append(events, &si.EventRecord{
 		TimestampNano:     400,
 		Type:              si.EventRecord_NODE,
 		EventChangeType:   si.EventRecord_ADD,
 		EventChangeDetail: si.EventRecord_NODE_ALLOC,
-		ObjectID:          "node-1"}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     2,
-		HighestID:    3,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: events,
-	})
+		ObjectID:          "node-1"})
+	client.setContents("yunikornUUID", events, 0, 3)
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	persistenceCalls := mockDB.getPersistenceCalls()
@@ -92,29 +77,18 @@ func TestPersistMultipleRounds(t *testing.T) {
 	assert.Equal(t, uint64(4), reader.startID)
 
 	// third round, no new events
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    3,
-		InstanceUUID: "yunikornUUID",
-	})
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 2, len(mockDB.getPersistenceCalls()))
 
 	// fourth round, one new event
-	events = make([]*si.EventRecord, 1)
-	events[0] = &si.EventRecord{
+	events = append(events, &si.EventRecord{
 		TimestampNano:     500,
 		Type:              si.EventRecord_APP,
 		EventChangeType:   si.EventRecord_SET,
 		EventChangeDetail: si.EventRecord_APP_COMPLETING,
-		ObjectID:          "app-1"}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     4,
-		HighestID:    4,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: events,
-	})
+		ObjectID:          "app-1"})
+	client.setContents("yunikornUUID", events, 0, 4)
 
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
@@ -136,40 +110,37 @@ func TestDetectYunikornRestart(t *testing.T) {
 		{TimestampNano: 100, Type: si.EventRecord_APP, ObjectID: "app-1"},
 		{TimestampNano: 200, Type: si.EventRecord_APP, ObjectID: "app-1"},
 	}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    1,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: events,
-	})
+	client.setContents("yunikornUUID", events, 0, 1)
 	reader := NewEventWriter(mockDB, client, cache)
 
-	newEvents := []*si.EventRecord{
+	err := reader.fetchAndPersistEvents(context.Background())
+	assert.NilError(t, err)
+
+	// next response with a different InstanceUUID
+	events = []*si.EventRecord{
 		{TimestampNano: 11, Type: si.EventRecord_APP,
 			EventChangeType:   si.EventRecord_ADD,
 			EventChangeDetail: si.EventRecord_DETAILS_NONE,
 			ObjectID:          "app-1"},
 		{TimestampNano: 22, Type: si.EventRecord_APP, ObjectID: "app-1"},
 	}
-	err := reader.fetchAndPersistEvents(context.Background())
-	assert.NilError(t, err)
+	client.setContents("yunikornUUID-2", events, 111, 112)
 
-	// next response with a different InstanceUUID
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    1,
-		InstanceUUID: "yunikornUUID-2",
-		EventRecords: newEvents,
-	})
+	// first cycle after restart, we detect the restart (no new events here)
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, 1, len(cache.events))
+	assert.Equal(t, 0, len(cache.events))
+	assert.Equal(t, uint64(111), reader.startID)
+
+	// second cycle after restart
+	err = reader.fetchAndPersistEvents(context.Background())
+	assert.NilError(t, err)
 	assert.Equal(t, "yunikornUUID-2", reader.ykID)
 	assert.Equal(t, "yunikornUUID-2", mockDB.getYunikornID())
 	call := mockDB.getPersistenceCalls()[1]
 	assert.Equal(t, 2, len(call.events))
 	assert.Equal(t, "yunikornUUID-2", call.yunikornID)
-	assert.Equal(t, uint64(0), call.startEventID)
+	assert.Equal(t, uint64(111), call.startEventID)
 	assert.Equal(t, 2, len(call.events))
 	assert.Equal(t, int64(11), call.events[0].TimestampNano)
 	assert.Equal(t, int64(22), call.events[1].TimestampNano)
@@ -179,16 +150,6 @@ func TestClientFailure(t *testing.T) {
 	mockDB := NewMockDB()
 	cache := NewEventCache()
 	client := &MockClient{}
-	events := []*si.EventRecord{
-		{TimestampNano: 100, Type: si.EventRecord_APP, ObjectID: "app-1"},
-		{TimestampNano: 200, Type: si.EventRecord_APP, ObjectID: "app-1"},
-	}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    1,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: events,
-	})
 	reader := NewEventWriter(mockDB, client, cache)
 	client.setFailure(true)
 
@@ -207,12 +168,7 @@ func TestPersistenceFailure(t *testing.T) {
 		{TimestampNano: 100, Type: si.EventRecord_APP, ObjectID: "app-1"},
 		{TimestampNano: 200, Type: si.EventRecord_APP, ObjectID: "app-1"},
 	}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     0,
-		HighestID:    1,
-		InstanceUUID: "yunikornUUID",
-		EventRecords: events,
-	})
+	client.setContents("yunikornUUID", events, 0, 1)
 	reader := NewEventWriter(mockDB, client, cache)
 
 	err := reader.fetchAndPersistEvents(context.Background())
@@ -223,11 +179,7 @@ func TestPersistenceFailure(t *testing.T) {
 
 func TestGetValidStartID(t *testing.T) {
 	client := &MockClient{}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     12345,
-		HighestID:    222222,
-		InstanceUUID: "yunikornUUID",
-	})
+	client.setContents("yunikornUUID", nil, 12345, 222222)
 	reader := NewEventWriter(NewMockDB(), client, NewEventCache())
 
 	reader.getValidStartID(context.Background())
@@ -237,11 +189,7 @@ func TestGetValidStartID(t *testing.T) {
 
 func TestGetValidStartIDWithFailure(t *testing.T) {
 	client := &MockClient{}
-	client.setResponse(&dao.EventRecordDAO{
-		LowestID:     12345,
-		HighestID:    222222,
-		InstanceUUID: "yunikornUUID",
-	})
+	client.setContents("yunikornUUID", nil, 12345, 222222)
 	client.setFailure(true)
 	reader := NewEventWriter(NewMockDB(), client, NewEventCache())
 
