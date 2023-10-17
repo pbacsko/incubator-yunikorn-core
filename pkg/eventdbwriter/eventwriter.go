@@ -3,6 +3,7 @@ package eventdbwriter
 import (
 	"context"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -11,8 +12,10 @@ import (
 )
 
 const defaultFetchPeriod = 2 * time.Second
+const defaultStartIDFetchPeriod = time.Second
 
 var eventFetchPeriod = defaultFetchPeriod
+var startIdFetchPeriod = defaultStartIDFetchPeriod
 
 // EventWriter periodically retrieves events from Yunikorn and persists them by using
 // the underlying storage object.
@@ -21,7 +24,7 @@ type EventWriter struct {
 	client  YunikornClient
 	cache   *EventCache
 	ykID    string
-	startID uint64
+	startID atomic.Uint64
 }
 
 func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *EventWriter {
@@ -41,7 +44,7 @@ func (e *EventWriter) getValidStartID(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second):
+		case <-time.After(startIdFetchPeriod):
 			err := e.tryGetValidStartIDOnce()
 			if err == nil {
 				return
@@ -57,7 +60,7 @@ func (e *EventWriter) tryGetValidStartIDOnce() error {
 		return err
 	}
 	GetLogger().Info("Lowest valid event ID", zap.Uint64("id", eventDao.LowestID))
-	e.startID = eventDao.LowestID
+	e.startID.Store(eventDao.LowestID)
 	return nil
 }
 
@@ -79,16 +82,17 @@ func (e *EventWriter) Start(ctx context.Context) {
 }
 
 func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
-	events, err := e.client.GetRecentEvents(e.startID)
+	startID := e.startID.Load()
+	events, err := e.client.GetRecentEvents(startID)
 	if err != nil {
 		return err
 	}
 
 	// corner case which can happen during startup
-	if len(events.EventRecords) == 0 && events.LowestID > e.startID {
-		GetLogger().Info("Adjusting startID", zap.Uint64("current", e.startID),
+	if len(events.EventRecords) == 0 && events.LowestID > startID {
+		GetLogger().Info("Adjusting startID", zap.Uint64("current", startID),
 			zap.Uint64("new", events.LowestID))
-		e.startID = events.LowestID
+		e.startID.Store(events.LowestID)
 		return nil
 	}
 
@@ -112,7 +116,7 @@ func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 		return nil
 	}
 
-	err = e.storage.PersistEvents(ctx, e.startID, events.EventRecords)
+	err = e.storage.PersistEvents(ctx, startID, events.EventRecords)
 	if err != nil {
 		GetLogger().Error("Failed to persist events", zap.Error(err))
 		return err
@@ -132,7 +136,7 @@ func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 		zap.Uint64("highest id", events.HighestID))
 
 	// update startID - next batch will start at this number in the next iteration
-	e.startID = events.HighestID + 1
+	e.startID.Store(events.HighestID + 1)
 
 	return nil
 }

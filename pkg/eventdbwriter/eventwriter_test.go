@@ -17,16 +17,15 @@ func TestSimpleEventPersistence(t *testing.T) {
 		{TimestampNano: 100, ObjectID: "app-1"},
 		{TimestampNano: 200, ObjectID: "app-1"},
 	}, 0, 1)
-	reader := NewEventWriter(mockDB, client, NewEventCache())
-	reader.startID = 0
+	writer := NewEventWriter(mockDB, client, NewEventCache())
 
-	err := reader.fetchAndPersistEvents(context.Background())
+	err := writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, "yunikornUUID", reader.ykID)
+	assert.Equal(t, "yunikornUUID", writer.ykID)
 
 	assert.Equal(t, 1, len(mockDB.getPersistenceCalls()))
 	assert.Equal(t, "yunikornUUID", mockDB.getYunikornID())
-	call := mockDB.persistenceCalls[0]
+	call := mockDB.getPersistenceCalls()[0]
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(0), call.startEventID)
 	assert.Equal(t, 2, len(call.events))
@@ -42,12 +41,12 @@ func TestPersistMultipleRounds(t *testing.T) {
 		{TimestampNano: 200, ObjectID: "app-1"},
 	}
 	client.setContents("yunikornUUID", events, 0, 1)
-	reader := NewEventWriter(mockDB, client, NewEventCache())
+	writer := NewEventWriter(mockDB, client, NewEventCache())
 
 	// first round, two events
-	err := reader.fetchAndPersistEvents(context.Background())
+	err := writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, "yunikornUUID", reader.ykID)
+	assert.Equal(t, "yunikornUUID", writer.ykID)
 
 	// second round, two new events (4 in total)
 	events = append(events, &si.EventRecord{
@@ -63,7 +62,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 		EventChangeDetail: si.EventRecord_NODE_ALLOC,
 		ObjectID:          "node-1"})
 	client.setContents("yunikornUUID", events, 0, 3)
-	err = reader.fetchAndPersistEvents(context.Background())
+	err = writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	persistenceCalls := mockDB.getPersistenceCalls()
 	assert.Equal(t, 2, len(persistenceCalls))
@@ -74,10 +73,10 @@ func TestPersistMultipleRounds(t *testing.T) {
 	assert.Equal(t, 2, len(call.events))
 	assert.Equal(t, int64(300), call.events[0].TimestampNano)
 	assert.Equal(t, int64(400), call.events[1].TimestampNano)
-	assert.Equal(t, uint64(4), reader.startID)
+	assert.Equal(t, uint64(4), writer.startID.Load())
 
 	// third round, no new events
-	err = reader.fetchAndPersistEvents(context.Background())
+	err = writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 2, len(mockDB.getPersistenceCalls()))
 
@@ -90,7 +89,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 		ObjectID:          "app-1"})
 	client.setContents("yunikornUUID", events, 0, 4)
 
-	err = reader.fetchAndPersistEvents(context.Background())
+	err = writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	persistenceCalls = mockDB.getPersistenceCalls()
 	assert.Equal(t, 3, len(persistenceCalls))
@@ -111,9 +110,9 @@ func TestDetectYunikornRestart(t *testing.T) {
 		{TimestampNano: 200, Type: si.EventRecord_APP, ObjectID: "app-1"},
 	}
 	client.setContents("yunikornUUID", events, 0, 1)
-	reader := NewEventWriter(mockDB, client, cache)
+	writer := NewEventWriter(mockDB, client, cache)
 
-	err := reader.fetchAndPersistEvents(context.Background())
+	err := writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 
 	// next response with a different InstanceUUID
@@ -127,15 +126,15 @@ func TestDetectYunikornRestart(t *testing.T) {
 	client.setContents("yunikornUUID-2", events, 111, 112)
 
 	// first cycle after restart, we detect the restart (no new events here)
-	err = reader.fetchAndPersistEvents(context.Background())
+	err = writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 0, len(cache.events))
-	assert.Equal(t, uint64(111), reader.startID)
+	assert.Equal(t, uint64(111), writer.startID.Load())
 
 	// second cycle after restart
-	err = reader.fetchAndPersistEvents(context.Background())
+	err = writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, "yunikornUUID-2", reader.ykID)
+	assert.Equal(t, "yunikornUUID-2", writer.ykID)
 	assert.Equal(t, "yunikornUUID-2", mockDB.getYunikornID())
 	call := mockDB.getPersistenceCalls()[1]
 	assert.Equal(t, 2, len(call.events))
@@ -150,10 +149,10 @@ func TestClientFailure(t *testing.T) {
 	mockDB := NewMockDB()
 	cache := NewEventCache()
 	client := &MockClient{}
-	reader := NewEventWriter(mockDB, client, cache)
+	writer := NewEventWriter(mockDB, client, cache)
 	client.setFailure(true)
 
-	err := reader.fetchAndPersistEvents(context.Background())
+	err := writer.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while getting events")
 	assert.Equal(t, 0, len(mockDB.getPersistenceCalls()))
 	assert.Equal(t, 0, len(cache.events))
@@ -169,9 +168,9 @@ func TestPersistenceFailure(t *testing.T) {
 		{TimestampNano: 200, Type: si.EventRecord_APP, ObjectID: "app-1"},
 	}
 	client.setContents("yunikornUUID", events, 0, 1)
-	reader := NewEventWriter(mockDB, client, cache)
+	writer := NewEventWriter(mockDB, client, cache)
 
-	err := reader.fetchAndPersistEvents(context.Background())
+	err := writer.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while storing events")
 	assert.Equal(t, 1, len(mockDB.getPersistenceCalls()))
 	assert.Equal(t, 0, len(cache.events))
@@ -180,24 +179,105 @@ func TestPersistenceFailure(t *testing.T) {
 func TestGetValidStartID(t *testing.T) {
 	client := &MockClient{}
 	client.setContents("yunikornUUID", nil, 12345, 222222)
-	reader := NewEventWriter(NewMockDB(), client, NewEventCache())
+	writer := NewEventWriter(NewMockDB(), client, NewEventCache())
 
-	reader.getValidStartID(context.Background())
+	writer.getValidStartID(context.Background())
 
-	assert.Equal(t, uint64(12345), reader.startID)
+	assert.Equal(t, uint64(12345), writer.startID.Load())
 }
 
 func TestGetValidStartIDWithFailure(t *testing.T) {
+	startIdFetchPeriod = 10 * time.Millisecond
+	defer func() {
+		startIdFetchPeriod = defaultStartIDFetchPeriod
+	}()
 	client := &MockClient{}
 	client.setContents("yunikornUUID", nil, 12345, 222222)
 	client.setFailure(true)
-	reader := NewEventWriter(NewMockDB(), client, NewEventCache())
+	writer := NewEventWriter(NewMockDB(), client, NewEventCache())
 
 	go func() {
-		time.Sleep(2 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 		client.setFailure(false)
 	}()
 
-	reader.getValidStartID(context.Background())
-	assert.Equal(t, uint64(12345), reader.startID)
+	writer.getValidStartID(context.Background())
+	assert.Equal(t, uint64(12345), writer.startID.Load())
+}
+
+func TestEventPersistenceBackground(t *testing.T) {
+	eventFetchPeriod = 10 * time.Millisecond
+	defer func() {
+		eventFetchPeriod = defaultFetchPeriod
+	}()
+	mockDB := NewMockDB()
+	client := &MockClient{}
+	events := []*si.EventRecord{
+		{TimestampNano: 100, ObjectID: "app-1"},
+		{TimestampNano: 200, ObjectID: "app-1"},
+	}
+	client.setContents("yunikornUUID", events, 3, 4)
+	writer := NewEventWriter(mockDB, client, NewEventCache())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	writer.Start(ctx)
+
+	// first round: persistence of two events
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, uint64(5), writer.startID.Load())
+	persistence := mockDB.getPersistenceCalls()
+	assert.Equal(t, 1, len(persistence))
+	call := persistence[0]
+	assert.Equal(t, "yunikornUUID", call.yunikornID)
+	assert.Equal(t, uint64(3), call.startEventID)
+	assert.Equal(t, 2, len(call.events))
+	assert.Equal(t, int64(100), call.events[0].TimestampNano)
+	assert.Equal(t, int64(200), call.events[1].TimestampNano)
+
+	// second round: add two new events
+	events = append(events, &si.EventRecord{
+		TimestampNano: 300,
+		ObjectID:      "app-1"})
+	events = append(events, &si.EventRecord{
+		TimestampNano: 400,
+		ObjectID:      "app-1"})
+	client.setContents("yunikornUUID", events, 3, 6)
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, uint64(7), writer.startID.Load())
+	persistence = mockDB.getPersistenceCalls()
+	assert.Equal(t, 2, len(persistence))
+	call = persistence[1]
+	assert.Equal(t, "yunikornUUID", call.yunikornID)
+	assert.Equal(t, uint64(5), call.startEventID)
+	assert.Equal(t, 2, len(call.events))
+	assert.Equal(t, int64(300), call.events[0].TimestampNano)
+	assert.Equal(t, int64(400), call.events[1].TimestampNano)
+
+	// third round: simulating YK restart
+	events = []*si.EventRecord{
+		{TimestampNano: 1000, ObjectID: "app-1"},
+		{TimestampNano: 1100, ObjectID: "app-1"},
+	}
+	client.setContents("yunikornUUID-2", events, 0, 1)
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, uint64(2), writer.startID.Load())
+	persistence = mockDB.getPersistenceCalls()
+	assert.Equal(t, 3, len(persistence))
+	call = persistence[2]
+	assert.Equal(t, "yunikornUUID-2", call.yunikornID)
+	assert.Equal(t, uint64(0), call.startEventID)
+	assert.Equal(t, 2, len(call.events))
+	assert.Equal(t, int64(1000), call.events[0].TimestampNano)
+	assert.Equal(t, int64(1100), call.events[1].TimestampNano)
+
+	// check cancellation
+	cancel()
+	events = append(events, &si.EventRecord{
+		TimestampNano: 1200,
+		ObjectID:      "app-1"})
+	client.setContents("yunikornUUID-2", events, 0, 2)
+	time.Sleep(100 * time.Millisecond)
+	persistence = mockDB.getPersistenceCalls()
+	assert.Equal(t, 3, len(persistence))
+	assert.Equal(t, uint64(2), writer.startID.Load())
 }
