@@ -148,10 +148,11 @@ func (ms *MockDB) getYunikornID() string {
 type MockClient struct {
 	failure  bool
 	response *dao.EventRecordDAO
+	events   []*si.EventRecord
 	sync.Mutex
 }
 
-func (mc *MockClient) GetRecentEvents(_ uint64) (*dao.EventRecordDAO, error) {
+func (mc *MockClient) GetRecentEvents(start uint64) (*dao.EventRecordDAO, error) {
 	mc.Lock()
 	defer mc.Unlock()
 
@@ -166,4 +167,10 @@ func (mc *MockClient) setFailure(b bool) {
 	mc.Lock()
 	defer mc.Unlock()
 	mc.failure = b
+}
+
+func (mc *MockClient) setResponse(r *dao.EventRecordDAO) {
+	mc.Lock()
+	defer mc.Unlock()
+	mc.response = r
 }

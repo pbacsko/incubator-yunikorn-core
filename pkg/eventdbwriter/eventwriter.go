@@ -10,7 +10,9 @@ import (
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
-var eventFetchPeriod = 2 * time.Second
+const defaultFetchPeriod = 2 * time.Second
+
+var eventFetchPeriod = defaultFetchPeriod
 
 // EventWriter periodically retrieves events from Yunikorn and persists them by using
 // the underlying storage object.
@@ -60,20 +62,20 @@ func (e *EventWriter) tryGetValidStartIDOnce() error {
 }
 
 func (e *EventWriter) Start(ctx context.Context) {
-	go func() {
+	go func(period time.Duration) {
 		e.getValidStartID(ctx)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(2 * time.Second):
+			case <-time.After(period):
 				err := e.fetchAndPersistEvents(ctx)
 				if err != nil {
 					GetLogger().Error("Unable to fetch events from Yunikorn", zap.Error(err))
 				}
 			}
 		}
-	}()
+	}(eventFetchPeriod)
 }
 
 func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
