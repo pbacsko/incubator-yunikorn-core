@@ -10,7 +10,9 @@ import (
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
-var expiry = 15 * time.Minute
+const defaultExpiry = 15 * time.Minute
+
+var expiry = defaultExpiry
 
 // EventCache stores application events to speed up REST queries.
 // Completed applications are removed after 15 minutes.
@@ -69,12 +71,12 @@ func (c *EventCache) GetEvents(appID string) []*si.EventRecord {
 }
 
 func (c *EventCache) Start(ctx context.Context) {
-	go func() {
+	go func(period time.Duration) {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(eventFetchPeriod):
+			case <-time.After(period):
 				numRemoved := c.cleanUpOldEntries()
 				if numRemoved > 0 {
 					GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
@@ -82,7 +84,7 @@ func (c *EventCache) Start(ctx context.Context) {
 				}
 			}
 		}
-	}()
+	}(expiry)
 }
 
 func (c *EventCache) Clear() {

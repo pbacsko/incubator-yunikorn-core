@@ -45,6 +45,7 @@ func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
 }
 
 func (es *EventService) Start(ctx context.Context) {
+	GetLogger().Info("Starting background services")
 	es.cache.Start(ctx)
 	es.web.Start(ctx)
 	es.writer.Start(ctx)
