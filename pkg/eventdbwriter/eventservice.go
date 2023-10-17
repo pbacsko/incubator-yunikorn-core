@@ -35,9 +35,7 @@ func CreateEventService(dbInfo DBInfo, yunikornHost string) *EventService {
 	cache := NewEventCache()
 	webservice := NewWebService(cache, storage)
 	writer := NewEventWriter(storage, NewHttpClient(yunikornHost), cache)
-	cleaner := &DBCleaner{
-		storage: storage,
-	}
+	cleaner := NewDBCleaner(storage)
 
 	return &EventService{
 		cache:   cache,
