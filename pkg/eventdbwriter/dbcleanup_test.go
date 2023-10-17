@@ -2,9 +2,10 @@ package eventdbwriter
 
 import (
 	"context"
-	"gotest.tools/v3/assert"
 	"testing"
 	"time"
+
+	"gotest.tools/v3/assert"
 )
 
 func TestRemoveRows(t *testing.T) {
@@ -12,7 +13,7 @@ func TestRemoveRows(t *testing.T) {
 	cleaner := &DBCleaner{
 		storage: mockDB,
 	}
-	mockDB.numRemoved = 15
+	mockDB.setNumRemoved(15)
 
 	numRemoved, err := cleaner.removeRows(context.Background())
 
@@ -20,7 +21,7 @@ func TestRemoveRows(t *testing.T) {
 	assert.Equal(t, 1, len(removes))
 	assert.Equal(t, int64(15), numRemoved)
 	assert.NilError(t, err)
-	diff := time.Now().Sub(removes[0].cutoff).Round(time.Hour)
+	diff := time.Since(removes[0].cutoff).Round(time.Hour)
 	assert.Equal(t, 24*time.Hour, diff)
 }
 
@@ -29,7 +30,7 @@ func TestRemoveRowsError(t *testing.T) {
 	cleaner := &DBCleaner{
 		storage: mockDB,
 	}
-	mockDB.removeFails = true
+	mockDB.setRemoveFailure(true)
 
 	numRemoved, err := cleaner.removeRows(context.Background())
 
@@ -47,7 +48,7 @@ func TestRemoveRecordsBackground(t *testing.T) {
 	cleaner := &DBCleaner{
 		storage: mockDB,
 	}
-	mockDB.numRemoved = 15
+	mockDB.setNumRemoved(15)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cleaner.Start(ctx)

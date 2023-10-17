@@ -32,10 +32,10 @@ func TestHistoryNotInCache(t *testing.T) {
 	storage := NewMockDB()
 	web := NewWebService(cache, storage)
 
-	storage.events = []*si.EventRecord{
+	storage.setEvents([]*si.EventRecord{
 		{TimestampNano: 123, ObjectID: "app-1"},
 		{TimestampNano: 234, ObjectID: "app-1"},
-	}
+	})
 
 	web.GetAppEvents(recorder, req, httprouter.Params{
 		{
@@ -97,7 +97,7 @@ func TestBackendFailure(t *testing.T) {
 	req := getRequest()
 	cache := NewEventCache()
 	storage := NewMockDB()
-	storage.getEventsFails = true
+	storage.setDbFetchFailure(true)
 	web := NewWebService(cache, storage)
 
 	web.GetAppEvents(recorder, req, httprouter.Params{

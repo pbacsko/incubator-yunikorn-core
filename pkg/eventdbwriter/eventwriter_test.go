@@ -2,8 +2,6 @@ package eventdbwriter
 
 import (
 	"context"
-	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -31,8 +29,8 @@ func TestSimpleEventPersistence(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, "yunikornUUID", reader.ykID)
 
-	assert.Equal(t, 1, len(mockDB.persistenceCalls))
-	assert.Equal(t, "yunikornUUID", mockDB.ykID)
+	assert.Equal(t, 1, len(mockDB.getPersistenceCalls()))
+	assert.Equal(t, "yunikornUUID", mockDB.getYunikornID())
 	call := mockDB.persistenceCalls[0]
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(0), call.startEventID)
@@ -79,8 +77,9 @@ func TestPersistMultipleRounds(t *testing.T) {
 	client.response.HighestID = 3
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, 2, len(mockDB.persistenceCalls))
-	call := mockDB.persistenceCalls[1]
+	persistenceCalls := mockDB.getPersistenceCalls()
+	assert.Equal(t, 2, len(persistenceCalls))
+	call := persistenceCalls[1]
 	assert.Equal(t, 2, len(call.events))
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(2), call.startEventID)
@@ -95,7 +94,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 	client.response.HighestID = 3
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, 2, len(mockDB.persistenceCalls))
+	assert.Equal(t, 2, len(mockDB.getPersistenceCalls()))
 
 	// fourth round, one new event
 	events = make([]*si.EventRecord, 1)
@@ -111,8 +110,9 @@ func TestPersistMultipleRounds(t *testing.T) {
 
 	err = reader.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	assert.Equal(t, 3, len(mockDB.persistenceCalls))
-	call = mockDB.persistenceCalls[2]
+	persistenceCalls = mockDB.getPersistenceCalls()
+	assert.Equal(t, 3, len(persistenceCalls))
+	call = persistenceCalls[2]
 	assert.Equal(t, 1, len(call.events))
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(4), call.startEventID)
@@ -157,8 +157,8 @@ func TestDetectYunikornRestart(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, 1, len(cache.events))
 	assert.Equal(t, "yunikornUUID-2", reader.ykID)
-	assert.Equal(t, "yunikornUUID-2", mockDB.ykID)
-	call := mockDB.persistenceCalls[1]
+	assert.Equal(t, "yunikornUUID-2", mockDB.getYunikornID())
+	call := mockDB.getPersistenceCalls()[1]
 	assert.Equal(t, 2, len(call.events))
 	assert.Equal(t, "yunikornUUID-2", call.yunikornID)
 	assert.Equal(t, uint64(0), call.startEventID)
@@ -186,13 +186,13 @@ func TestClientFailure(t *testing.T) {
 
 	err := reader.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while getting events")
-	assert.Equal(t, 0, len(mockDB.persistenceCalls))
+	assert.Equal(t, 0, len(mockDB.getPersistenceCalls()))
 	assert.Equal(t, 0, len(cache.events))
 }
 
 func TestPersistenceFailure(t *testing.T) {
 	mockDB := NewMockDB()
-	mockDB.persistFails = true
+	mockDB.setPersistenceFailure(true)
 	cache := NewEventCache()
 	client := &MockClient{}
 	events := []*si.EventRecord{
@@ -209,7 +209,7 @@ func TestPersistenceFailure(t *testing.T) {
 
 	err := reader.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while storing events")
-	assert.Equal(t, 1, len(mockDB.persistenceCalls))
+	assert.Equal(t, 1, len(mockDB.getPersistenceCalls()))
 	assert.Equal(t, 0, len(cache.events))
 }
 
@@ -244,128 +244,4 @@ func TestGetValidStartIDWithFailure(t *testing.T) {
 
 	reader.getValidStartID(context.Background())
 	assert.Equal(t, uint64(12345), reader.startID)
-}
-
-type PersistenceCall struct {
-	yunikornID   string
-	startEventID uint64
-	events       []*si.EventRecord
-}
-
-type RemoveCall struct {
-	cutoff time.Time
-}
-
-type MockDB struct {
-	events           []*si.EventRecord
-	persistenceCalls []PersistenceCall
-	removeCalls      []RemoveCall
-	numRemoved       int64
-	ykID             string
-
-	persistFails   bool
-	getEventsFails bool
-	removeFails    bool
-
-	sync.Mutex
-}
-
-func (ms *MockDB) SetYunikornID(yunikornID string) {
-	ms.Lock()
-	defer ms.Unlock()
-
-	ms.ykID = yunikornID
-}
-
-func NewMockDB() *MockDB {
-	return &MockDB{
-		events: make([]*si.EventRecord, 0),
-	}
-}
-
-func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events []*si.EventRecord) error {
-	ms.Lock()
-	defer ms.Unlock()
-
-	ms.persistenceCalls = append(ms.persistenceCalls, PersistenceCall{
-		yunikornID:   ms.ykID,
-		startEventID: startEventID,
-		events:       events,
-	})
-
-	if ms.persistFails {
-		return fmt.Errorf("error while storing events")
-	}
-
-	return nil
-}
-
-func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.EventRecord, error) {
-	ms.Lock()
-	defer ms.Unlock()
-
-	if ms.getEventsFails {
-		return nil, fmt.Errorf("error while fetching events")
-	}
-
-	var result []*si.EventRecord
-	for _, event := range ms.events {
-		if event.ObjectID == appID {
-			result = append(result, event)
-		}
-	}
-
-	return result, nil
-}
-
-func (ms *MockDB) RemoveOldEntries(_ context.Context, cutoff time.Time) (int64, error) {
-	ms.Lock()
-	defer ms.Unlock()
-
-	ms.removeCalls = append(ms.removeCalls, RemoveCall{
-		cutoff: cutoff,
-	})
-
-	if ms.removeFails {
-		return 0, fmt.Errorf("error while removing records")
-	}
-
-	return ms.numRemoved, nil
-}
-
-func (ms *MockDB) getRemoveCalls() []RemoveCall {
-	ms.Lock()
-	defer ms.Unlock()
-
-	return ms.removeCalls
-}
-
-func (ms *MockDB) getPersistenceCalls() []PersistenceCall {
-	ms.Lock()
-	defer ms.Unlock()
-
-	return ms.persistenceCalls
-}
-
-type MockClient struct {
-	failure  bool
-	response *dao.EventRecordDAO
-	sync.Mutex
-}
-
-func (mc *MockClient) GetRecentEvents(_ uint64) (*dao.EventRecordDAO, error) {
-	mc.Lock()
-	defer mc.Unlock()
-
-	if mc.failure {
-		return nil, fmt.Errorf("error while getting events")
-	}
-
-	return mc.response, nil
-}
-
-func (mc *MockClient) setFailure(b bool) {
-	mc.Lock()
-	defer mc.Unlock()
-	mc.failure = b
 }
