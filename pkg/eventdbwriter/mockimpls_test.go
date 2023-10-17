@@ -82,7 +82,7 @@ func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.Eve
 	return result, nil
 }
 
-func (ms *MockDB) RemoveOldEntries(_ context.Context, cutoff time.Time) (int64, error) {
+func (ms *MockDB) RemoveObsoleteEntries(_ context.Context, cutoff time.Time) (int64, error) {
 	ms.Lock()
 	defer ms.Unlock()
 

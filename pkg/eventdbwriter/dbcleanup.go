@@ -9,19 +9,24 @@ import (
 
 const defaultCleanupPeriod = time.Hour
 
-var cleanupPeriod = defaultCleanupPeriod
-
 type DBCleaner struct {
-	storage Storage
+	storage       Storage
+	cleanupPeriod time.Duration
 }
 
+func NewDBCleaner(storage Storage) *DBCleaner {
+	return &DBCleaner{
+		storage:       storage,
+		cleanupPeriod: defaultCleanupPeriod,
+	}
+}
 func (c *DBCleaner) Start(ctx context.Context) {
-	go func(p time.Duration) {
+	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(p):
+			case <-time.After(c.cleanupPeriod):
 				var numRemoved int64
 				var err error
 				if numRemoved, err = c.removeRows(ctx); err != nil {
@@ -33,14 +38,14 @@ func (c *DBCleaner) Start(ctx context.Context) {
 					numRemoved))
 			}
 		}
-	}(cleanupPeriod)
+	}()
 }
 
 func (c *DBCleaner) removeRows(ctx context.Context) (int64, error) {
 	cutoff := time.Now().Add(-24 * time.Hour)
 	GetLogger().Info("Cleaning up database - removing entries that are considered old",
 		zap.Time("cutoff time", cutoff))
-	numRemoved, err := c.storage.RemoveOldEntries(ctx, cutoff)
+	numRemoved, err := c.storage.RemoveObsoleteEntries(ctx, cutoff)
 	if err != nil {
 		return 0, err
 	}

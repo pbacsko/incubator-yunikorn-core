@@ -10,9 +10,7 @@ import (
 
 func TestRemoveRows(t *testing.T) {
 	mockDB := NewMockDB()
-	cleaner := &DBCleaner{
-		storage: mockDB,
-	}
+	cleaner := NewDBCleaner(mockDB)
 	mockDB.setNumRemoved(15)
 
 	numRemoved, err := cleaner.removeRows(context.Background())
@@ -27,9 +25,7 @@ func TestRemoveRows(t *testing.T) {
 
 func TestRemoveRowsError(t *testing.T) {
 	mockDB := NewMockDB()
-	cleaner := &DBCleaner{
-		storage: mockDB,
-	}
+	cleaner := NewDBCleaner(mockDB)
 	mockDB.setRemoveFailure(true)
 
 	numRemoved, err := cleaner.removeRows(context.Background())
@@ -40,14 +36,9 @@ func TestRemoveRowsError(t *testing.T) {
 }
 
 func TestRemoveRecordsBackground(t *testing.T) {
-	cleanupPeriod = 10 * time.Millisecond
-	defer func() {
-		cleanupPeriod = defaultCleanupPeriod
-	}()
 	mockDB := NewMockDB()
-	cleaner := &DBCleaner{
-		storage: mockDB,
-	}
+	cleaner := NewDBCleaner(mockDB)
+	cleaner.cleanupPeriod = 10 * time.Millisecond
 	mockDB.setNumRemoved(15)
 
 	ctx, cancel := context.WithCancel(context.Background())
