@@ -2,6 +2,7 @@ package eventdbwriter
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestPersistMultipleRounds(t *testing.T) {
 	assert.Equal(t, 2, len(call.events))
 	assert.Equal(t, int64(300), call.events[0].TimestampNano)
 	assert.Equal(t, int64(400), call.events[1].TimestampNano)
-	assert.Equal(t, uint64(4), writer.startID.Load())
+	assert.Equal(t, uint64(4), writer.eventID.Load())
 
 	// third round, no new events
 	err = writer.fetchAndPersistEvents(context.Background())
@@ -129,7 +130,7 @@ func TestDetectYunikornRestart(t *testing.T) {
 	err = writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
 	assert.Equal(t, 0, len(cache.events))
-	assert.Equal(t, uint64(111), writer.startID.Load())
+	assert.Assert(t, !writer.haveEventID)
 
 	// second cycle after restart
 	err = writer.fetchAndPersistEvents(context.Background())
@@ -176,30 +177,59 @@ func TestPersistenceFailure(t *testing.T) {
 	assert.Equal(t, 0, len(cache.events))
 }
 
-func TestGetValidStartID(t *testing.T) {
+func TestStartIDChangesAfterInitialFetch(t *testing.T) {
+	// test special case: we fetch the lowest id, then it becomes invalid immediately, because
+	// the ring buffer is full and the oldest event is overwritten.
 	client := &MockClient{}
-	client.setContents("yunikornUUID", nil, 12345, 222222)
-	writer := NewEventWriter(NewMockDB(), client, NewEventCache())
 
-	writer.getValidStartID(context.Background())
+	// use callback function, so we can react to the tight for loop quickly
+	client.setOnGetEvents(func(start uint64) {
+		// first call to get start ID
+		if start == math.MaxUint64 {
+			client.setContentsNoLock("yunikornUUID", nil, 100, 102)
+			return
+		}
 
-	assert.Equal(t, uint64(12345), writer.startID.Load())
-}
+		// second call with start == 100, return a new "lowestID", ie. the previous is no longer valid
+		if start == 100 {
+			client.setContentsNoLock("yunikornUUID", nil, 103, 105)
+			return
+		}
 
-func TestGetValidStartIDWithFailure(t *testing.T) {
-	client := &MockClient{}
-	client.setContents("yunikornUUID", nil, 12345, 222222)
-	client.setFailure(true)
-	writer := NewEventWriter(NewMockDB(), client, NewEventCache())
-	writer.idFetchRetryWait = 10 * time.Millisecond
+		// third call with start == 103, perform yet another round
+		if start == 103 {
+			client.setContentsNoLock("yunikornUUID", nil, 105, 107)
+			return
+		}
 
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		client.setFailure(false)
-	}()
+		// final round
+		if start == 105 {
+			client.setContentsNoLock("yunikornUUID", []*si.EventRecord{
+				{TimestampNano: 100, Type: si.EventRecord_APP, ObjectID: "app-1"},
+				{TimestampNano: 200, Type: si.EventRecord_APP, ObjectID: "app-1"},
+				{TimestampNano: 300, Type: si.EventRecord_APP, ObjectID: "app-1"},
+			}, 105, 107)
+			client.setOnGetEventsNoLock(nil) // disable this callback
+			return
+		}
 
-	writer.getValidStartID(context.Background())
-	assert.Equal(t, uint64(12345), writer.startID.Load())
+		t.Errorf("Unexpected argument for callback function: %d", start)
+	})
+
+	mockDB := NewMockDB()
+	writer := NewEventWriter(mockDB, client, NewEventCache())
+
+	err := writer.fetchAndPersistEvents(context.Background())
+	assert.NilError(t, err)
+	persistence := mockDB.getPersistenceCalls()
+	assert.Equal(t, 1, len(persistence))
+	call := persistence[0]
+	assert.Equal(t, 3, len(call.events))
+	assert.Equal(t, "yunikornUUID", call.yunikornID)
+	assert.Equal(t, uint64(105), call.startEventID)
+	assert.Equal(t, int64(100), call.events[0].TimestampNano)
+	assert.Equal(t, int64(200), call.events[1].TimestampNano)
+	assert.Equal(t, int64(300), call.events[2].TimestampNano)
 }
 
 func TestEventPersistenceBackground(t *testing.T) {
@@ -218,7 +248,7 @@ func TestEventPersistenceBackground(t *testing.T) {
 
 	// first round: persistence of two events
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, uint64(5), writer.startID.Load())
+	assert.Equal(t, uint64(5), writer.eventID.Load())
 	persistence := mockDB.getPersistenceCalls()
 	assert.Equal(t, 1, len(persistence))
 	call := persistence[0]
@@ -237,7 +267,7 @@ func TestEventPersistenceBackground(t *testing.T) {
 		ObjectID:      "app-1"})
 	client.setContents("yunikornUUID", events, 3, 6)
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, uint64(7), writer.startID.Load())
+	assert.Equal(t, uint64(7), writer.eventID.Load())
 	persistence = mockDB.getPersistenceCalls()
 	assert.Equal(t, 2, len(persistence))
 	call = persistence[1]
@@ -254,7 +284,7 @@ func TestEventPersistenceBackground(t *testing.T) {
 	}
 	client.setContents("yunikornUUID-2", events, 0, 1)
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, uint64(2), writer.startID.Load())
+	assert.Equal(t, uint64(2), writer.eventID.Load())
 	persistence = mockDB.getPersistenceCalls()
 	assert.Equal(t, 3, len(persistence))
 	call = persistence[2]
@@ -273,22 +303,5 @@ func TestEventPersistenceBackground(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	persistence = mockDB.getPersistenceCalls()
 	assert.Equal(t, 3, len(persistence))
-	assert.Equal(t, uint64(2), writer.startID.Load())
-}
-
-func TestGetValidStartIDCancelPropagation(t *testing.T) {
-	client := &MockClient{}
-	mockDB := NewMockDB()
-	client.setFailure(true)
-	writer := NewEventWriter(mockDB, client, NewEventCache())
-	writer.idFetchRetryWait = 10 * time.Millisecond
-
-	ctx, cancel := context.WithCancel(context.Background())
-	writer.Start(ctx)
-
-	time.Sleep(100 * time.Millisecond)
-	cancel()
-	time.Sleep(100 * time.Millisecond)
-	numCalls := client.getNumCalls()
-	assert.Assert(t, numCalls >= 8 && numCalls <= 11, "expected to have 8-11 client calls, got %d", numCalls)
+	assert.Equal(t, uint64(2), writer.eventID.Load())
 }

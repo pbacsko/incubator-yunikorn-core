@@ -8,23 +8,23 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/apache/yunikorn-core/pkg/webservice/dao"
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
 const defaultFetchPeriod = 2 * time.Second
-const defaultStartIDFetchPeriod = time.Second
 
 // EventWriter periodically retrieves events from Yunikorn and persists them by using
 // the underlying storage object.
 type EventWriter struct {
-	storage Storage
-	client  YunikornClient
-	cache   *EventCache
-	ykID    string
-	startID atomic.Uint64
+	storage     Storage
+	client      YunikornClient
+	cache       *EventCache
+	ykID        string        // yunikorn instance ID
+	eventID     atomic.Uint64 // current lowest event id for event retrieval, passed to the client
+	haveEventID bool          // whether we have id set or not
 
 	eventFetchPeriod time.Duration
-	idFetchRetryWait time.Duration
 }
 
 func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *EventWriter {
@@ -33,42 +33,12 @@ func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *
 		client:           client,
 		cache:            cache,
 		eventFetchPeriod: defaultFetchPeriod,
-		idFetchRetryWait: defaultStartIDFetchPeriod,
+		haveEventID:      false,
 	}
-}
-
-func (e *EventWriter) getValidStartID(ctx context.Context) {
-	err := e.tryGetValidStartIDOnce()
-	if err == nil {
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(e.idFetchRetryWait):
-			err := e.tryGetValidStartIDOnce()
-			if err == nil {
-				return
-			}
-		}
-	}
-}
-
-func (e *EventWriter) tryGetValidStartIDOnce() error {
-	eventDao, err := e.client.GetRecentEvents(math.MaxUint64)
-	if err != nil {
-		GetLogger().Error("Coult not fetch events", zap.Error(err))
-		return err
-	}
-	GetLogger().Info("Lowest valid event ID", zap.Uint64("id", eventDao.LowestID))
-	e.startID.Store(eventDao.LowestID)
-	return nil
 }
 
 func (e *EventWriter) Start(ctx context.Context) {
 	go func() {
-		e.getValidStartID(ctx)
 		for {
 			select {
 			case <-ctx.Done():
@@ -84,32 +54,14 @@ func (e *EventWriter) Start(ctx context.Context) {
 }
 
 func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
-	startID := e.startID.Load()
-	events, err := e.client.GetRecentEvents(startID)
+	events, eventID, err := e.fetchEvents()
 	if err != nil {
 		return err
 	}
 
-	// corner case which can happen during startup
-	if len(events.EventRecords) == 0 && events.LowestID > startID {
-		GetLogger().Info("Adjusting startID", zap.Uint64("current", startID),
-			zap.Uint64("new", events.LowestID))
-		e.startID.Store(events.LowestID)
-		return nil
-	}
-
 	uuid := events.InstanceUUID
 	e.storage.SetYunikornID(uuid)
-	// Restart detection
-	//
-	// No matter if we have new events or not, we need to detect the lowest id again,
-	// so just do some bookkeeping and collect events in the next cycle.
-	if e.ykID != "" && e.ykID != uuid {
-		GetLogger().Info("Yunikorn restart detected",
-			zap.String("last uuid", e.ykID), zap.String("new uuid", uuid))
-		e.cache.Clear()
-		e.ykID = uuid
-		e.getValidStartID(ctx)
+	if e.checkRestart(uuid) {
 		return nil
 	}
 	e.ykID = uuid
@@ -117,8 +69,70 @@ func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 	if len(events.EventRecords) == 0 {
 		return nil
 	}
+	err = e.persistEvents(ctx, eventID, events)
+	if err != nil {
+		return err
+	}
 
-	err = e.storage.PersistEvents(ctx, startID, events.EventRecords)
+	// update startID - next batch will start at this number in the next iteration
+	e.eventID.Store(events.HighestID + 1)
+
+	return nil
+}
+
+func (e *EventWriter) fetchEvents() (*dao.EventRecordDAO, uint64, error) {
+	eventID := e.eventID.Load()
+
+	// Need a tight loop here: if the ring buffer is written quickly,
+	// then the lowest valid ID is also changing quickly.
+	// So we update it from the empty response and fetch all events again.
+	// This can happen during startup.
+	for {
+		if !e.haveEventID {
+			// make sure we don't retrieve any valid record by accident
+			eventID = math.MaxUint64
+		}
+		events, err := e.client.GetRecentEvents(eventID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if !e.haveEventID || (len(events.EventRecords) == 0 && events.LowestID > eventID) {
+			if e.haveEventID {
+				GetLogger().Info("Adjusting event ID, current one became invalid", zap.Uint64("current", eventID),
+					zap.Uint64("new", events.LowestID))
+			} else {
+				GetLogger().Info("Setting valid event ID",
+					zap.Uint64("new", events.LowestID))
+			}
+
+			e.eventID.Store(events.LowestID)
+			e.haveEventID = true
+			eventID = events.LowestID
+			continue
+		}
+
+		return events, eventID, nil
+	}
+}
+
+func (e *EventWriter) checkRestart(uuid string) bool {
+	// No matter if we have new events or not, we need to detect the lowest id again,
+	// so just do some bookkeeping and collect events in the next cycle.
+	if e.ykID != "" && e.ykID != uuid {
+		GetLogger().Info("Yunikorn restart detected",
+			zap.String("last uuid", e.ykID), zap.String("new uuid", uuid))
+		e.cache.Clear()
+		e.ykID = uuid
+		e.haveEventID = false
+		return true
+	}
+
+	return false
+}
+
+func (e *EventWriter) persistEvents(ctx context.Context, eventID uint64, events *dao.EventRecordDAO) error {
+	err := e.storage.PersistEvents(ctx, eventID, events.EventRecords)
 	if err != nil {
 		GetLogger().Error("Failed to persist events", zap.Error(err))
 		return err
@@ -136,9 +150,6 @@ func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 		zap.Int("number of events", len(events.EventRecords)),
 		zap.Uint64("lowest id", events.LowestID),
 		zap.Uint64("highest id", events.HighestID))
-
-	// update startID - next batch will start at this number in the next iteration
-	e.startID.Store(events.HighestID + 1)
 
 	return nil
 }

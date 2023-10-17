@@ -77,7 +77,7 @@ func (c *EventCache) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(c.expiry):
-				numRemoved := c.cleanUpOldEntries()
+				numRemoved := c.removeExpiredEntries()
 				if numRemoved > 0 {
 					GetLogger().Info("Event cache: removed expired entries", zap.Int("number of entries",
 						numRemoved))
@@ -96,7 +96,7 @@ func (c *EventCache) Clear() {
 	c.completionTime = make(map[string]time.Time)
 }
 
-func (c *EventCache) cleanUpOldEntries() int {
+func (c *EventCache) removeExpiredEntries() int {
 	c.Lock()
 	defer c.Unlock()
 

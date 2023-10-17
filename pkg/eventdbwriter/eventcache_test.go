@@ -75,7 +75,7 @@ func TestCompletedAppsCleanup(t *testing.T) {
 	})
 	assert.Equal(t, 2, len(cache.completionTime))
 
-	cnt := cache.cleanUpOldEntries()
+	cnt := cache.removeExpiredEntries()
 	assert.Equal(t, 2, cnt)
 	assert.Equal(t, 0, len(cache.fullHistory))
 	assert.Equal(t, 0, len(cache.completionTime))

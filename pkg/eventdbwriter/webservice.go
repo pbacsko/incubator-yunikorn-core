@@ -44,7 +44,14 @@ func (m *WebService) Start(ctx context.Context) {
 	}()
 	go func() {
 		<-ctx.Done()
-		m.httpServer.Close()
+		GetLogger().Info("Shutting down web server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		err := m.httpServer.Shutdown(shutdownCtx)
+		if err != nil {
+			GetLogger().Error("HTTP server was shut down with error",
+				zap.Error(err))
+		}
 	}()
 }
 

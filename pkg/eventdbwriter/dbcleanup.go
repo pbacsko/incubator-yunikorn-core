@@ -43,7 +43,7 @@ func (c *DBCleaner) Start(ctx context.Context) {
 
 func (c *DBCleaner) removeRows(ctx context.Context) (int64, error) {
 	cutoff := time.Now().Add(-24 * time.Hour)
-	GetLogger().Info("Cleaning up database - removing entries that are considered old",
+	GetLogger().Info("Cleaning up database - removing entries that are considered obsolete",
 		zap.Time("cutoff time", cutoff))
 	numRemoved, err := c.storage.RemoveObsoleteEntries(ctx, cutoff)
 	if err != nil {
