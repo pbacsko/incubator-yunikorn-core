@@ -266,9 +266,14 @@ type MockDB struct {
 	persistFails   bool
 	getEventsFails bool
 	removeFails    bool
+
+	sync.Mutex
 }
 
 func (ms *MockDB) SetYunikornID(yunikornID string) {
+	ms.Lock()
+	defer ms.Unlock()
+
 	ms.ykID = yunikornID
 }
 
@@ -279,6 +284,9 @@ func NewMockDB() *MockDB {
 }
 
 func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events []*si.EventRecord) error {
+	ms.Lock()
+	defer ms.Unlock()
+
 	ms.persistenceCalls = append(ms.persistenceCalls, PersistenceCall{
 		yunikornID:   ms.ykID,
 		startEventID: startEventID,
@@ -293,6 +301,9 @@ func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events [
 }
 
 func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.EventRecord, error) {
+	ms.Lock()
+	defer ms.Unlock()
+
 	if ms.getEventsFails {
 		return nil, fmt.Errorf("error while fetching events")
 	}
@@ -308,6 +319,9 @@ func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.Eve
 }
 
 func (ms *MockDB) RemoveOldEntries(_ context.Context, cutoff time.Time) (int64, error) {
+	ms.Lock()
+	defer ms.Unlock()
+
 	ms.removeCalls = append(ms.removeCalls, RemoveCall{
 		cutoff: cutoff,
 	})
@@ -317,6 +331,20 @@ func (ms *MockDB) RemoveOldEntries(_ context.Context, cutoff time.Time) (int64, 
 	}
 
 	return ms.numRemoved, nil
+}
+
+func (ms *MockDB) getRemoveCalls() []RemoveCall {
+	ms.Lock()
+	defer ms.Unlock()
+
+	return ms.removeCalls
+}
+
+func (ms *MockDB) getPersistenceCalls() []PersistenceCall {
+	ms.Lock()
+	defer ms.Unlock()
+
+	return ms.persistenceCalls
 }
 
 type MockClient struct {
