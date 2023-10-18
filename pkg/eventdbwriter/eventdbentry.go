@@ -11,13 +11,13 @@ import (
 
 // EventDBEntry Database row object for GORM
 type EventDBEntry struct {
-	YunikornID   string `gorm:"primarykey;not null;size:36"`
-	EventID      uint64 `gorm:"not null"`
+	YunikornID   string `gorm:"column:yunikorn_id;primarykey;not null;size:36"`
+	EventID      uint64 `gorm:"primarykey;not null"`
 	Type         int64  `gorm:"not null"`
-	ObjectID     string `gorm:"not null"`
+	ObjectID     string `gorm:"column:object_id;not null"`
 	ReferenceID  string
 	Message      string
-	Timestamp    time.Time `gorm:"not null"`
+	Timestamp    time.Time `gorm:"column:event_time;not null"`
 	ChangeType   int64     `gorm:"not null"`
 	ChangeDetail int64     `gorm:"not null"`
 	Resource     string

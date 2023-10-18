@@ -77,7 +77,7 @@ func (s *DBStorage) PersistEvents(ctx context.Context, startEventID uint64, even
 func (s *DBStorage) RemoveObsoleteEntries(ctx context.Context, cutoff time.Time) (int64, error) {
 	var rowsAffected int64
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("time < ?", cutoff).Delete(&EventDBEntry{})
+		result := tx.Where("event_time <= ?", cutoff).Delete(&EventDBEntry{})
 		rowsAffected = result.RowsAffected
 		return result.Error
 	})
@@ -92,7 +92,7 @@ func (s *DBStorage) GetAllEventsForApp(ctx context.Context, appID string) ([]*si
 	}
 	var result []EventDBEntry
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return s.db.Where("objectID = ? AND yunikorn_id = ?", appID, yunikornID).Find(&result).Error
+		return s.db.Where("object_id = ? AND yunikorn_id = ?", appID, yunikornID).Find(&result).Error
 	})
 	if err != nil {
 		GetLogger().Error("Could not read from database", zap.Error(err))
