@@ -27,15 +27,15 @@ func TestEntryFromSI(t *testing.T) {
 		Resource:          res.ToProto(),
 	}
 	dbEntry := entryFromSI("yunikornuuid", 100, event)
-	assert.Equal(t, int32(si.EventRecord_APP), dbEntry.Type)
+	assert.Equal(t, int64(si.EventRecord_APP), dbEntry.Type)
 	assert.Equal(t, "yunikornuuid", dbEntry.YunikornID)
 	assert.Equal(t, uint64(100), dbEntry.EventID)
 	assert.Equal(t, "alloc-1", dbEntry.ObjectID)
 	assert.Equal(t, "app-1", dbEntry.ReferenceID)
 	assert.Equal(t, "message", dbEntry.Message)
 	assert.Equal(t, int64(123), dbEntry.Timestamp.UnixNano())
-	assert.Equal(t, int32(si.EventRecord_SET), dbEntry.ChangeType)
-	assert.Equal(t, int32(si.EventRecord_APP_NEW), dbEntry.ChangeDetail)
+	assert.Equal(t, int64(si.EventRecord_SET), dbEntry.ChangeType)
+	assert.Equal(t, int64(si.EventRecord_APP_NEW), dbEntry.ChangeDetail)
 	assert.Assert(t, dbEntry.Resource != "")
 	var unmarshalledRes si.Resource
 	err := json.Unmarshal([]byte(dbEntry.Resource), &unmarshalledRes)
@@ -53,8 +53,8 @@ func TestSIfromEntry(t *testing.T) {
 		ReferenceID:  "alloc-1",
 		Message:      "message",
 		Timestamp:    time.Unix(0, 1234),
-		ChangeType:   int32(2),   // EventRecord_ADD
-		ChangeDetail: int32(303), // EventRecord_NODE_ALLOC
+		ChangeType:   int64(2),   // EventRecord_ADD
+		ChangeDetail: int64(303), // EventRecord_NODE_ALLOC
 		Resource:     "{\"resources\":{\"cpu\":{\"value\":1},\"memory\":{\"value\":100}}}",
 	}
 

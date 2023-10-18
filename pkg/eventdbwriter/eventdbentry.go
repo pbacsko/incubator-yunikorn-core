@@ -12,14 +12,14 @@ import (
 // EventDBEntry Database row object for GORM
 type EventDBEntry struct {
 	YunikornID   string `gorm:"primarykey;not null;size:36"`
-	EventID      uint64 `gorm:"primarykey;not null"`
-	Type         int32  `gorm:"not null"`
+	EventID      uint64 `gorm:"not null"`
+	Type         int64  `gorm:"not null"`
 	ObjectID     string `gorm:"not null"`
 	ReferenceID  string
 	Message      string
 	Timestamp    time.Time `gorm:"not null"`
-	ChangeType   int32     `gorm:"not null"`
-	ChangeDetail int32     `gorm:"not null"`
+	ChangeType   int64     `gorm:"not null"`
+	ChangeDetail int64     `gorm:"not null"`
 	Resource     string
 }
 
@@ -38,13 +38,13 @@ func entryFromSI(yunikornID string, eventID uint64, event *si.EventRecord) *Even
 	return &EventDBEntry{
 		YunikornID:   yunikornID,
 		EventID:      eventID,
-		Type:         int32(event.Type),
+		Type:         int64(event.Type),
 		ObjectID:     event.ObjectID,
 		ReferenceID:  event.ReferenceID,
 		Message:      event.Message,
 		Timestamp:    time.Unix(0, event.TimestampNano),
-		ChangeType:   int32(event.EventChangeType),
-		ChangeDetail: int32(event.EventChangeDetail),
+		ChangeType:   int64(event.EventChangeType),
+		ChangeDetail: int64(event.EventChangeDetail),
 		Resource:     resource,
 	}
 }
