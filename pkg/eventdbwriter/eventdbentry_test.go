@@ -2,7 +2,6 @@ package eventdbwriter
 
 import (
 	"encoding/json"
-	"strconv"
 	"testing"
 	"time"
 
@@ -44,14 +43,6 @@ func TestEntryFromSI(t *testing.T) {
 	assert.Equal(t, 2, len(unmarshalledRes.Resources))
 	assert.Equal(t, int64(1), unmarshalledRes.Resources["cpu"].Value)
 	assert.Equal(t, int64(100), unmarshalledRes.Resources["memory"].Value)
-
-	// large resource object
-	for i := 0; i < 50; i++ {
-		res.Resources["res"+strconv.Itoa(i)] = 100
-	}
-	event.Resource = res.ToProto()
-	dbEntry = entryFromSI("yunikornuuid", 100, event)
-	assert.Equal(t, "", dbEntry.Resource)
 }
 
 func TestSIfromEntry(t *testing.T) {

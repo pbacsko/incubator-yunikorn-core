@@ -9,16 +9,14 @@ import (
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
-const maxResourceSize = 1024
-
 // EventDBEntry Database row object for GORM
 type EventDBEntry struct {
-	YunikornID   string    `gorm:"primarykey;not null;size:36"`
-	EventID      uint64    `gorm:"primarykey;not null"`
-	Type         int32     `gorm:"not null"`
-	ObjectID     string    `gorm:"not null;size:64"`
-	ReferenceID  string    `gorm:"size:64"`
-	Message      string    `gorm:"size:64"`
+	YunikornID   string `gorm:"primarykey;not null;size:36"`
+	EventID      uint64 `gorm:"primarykey;not null"`
+	Type         int32  `gorm:"not null"`
+	ObjectID     string `gorm:"not null"`
+	ReferenceID  string
+	Message      string
 	Timestamp    time.Time `gorm:"not null"`
 	ChangeType   int32     `gorm:"not null"`
 	ChangeDetail int32     `gorm:"not null"`
@@ -33,13 +31,7 @@ func entryFromSI(yunikornID string, eventID uint64, event *si.EventRecord) *Even
 			GetLogger().Error("Unable to properly marshal resource object",
 				zap.Any("resource", event.Resource))
 		} else {
-			resJson := string(r)
-			if len(resJson) <= maxResourceSize {
-				resource = resJson
-			} else {
-				GetLogger().Error("Marshalled resource string is too large",
-					zap.Any("resource", event.Resource))
-			}
+			resource = string(r)
 		}
 	}
 
