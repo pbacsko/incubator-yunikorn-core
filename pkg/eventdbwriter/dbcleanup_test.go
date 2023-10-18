@@ -26,7 +26,7 @@ func TestRemoveRows(t *testing.T) {
 func TestRemoveRowsError(t *testing.T) {
 	mockDB := NewMockDB()
 	cleaner := NewDBCleaner(mockDB)
-	mockDB.setRemoveFailure(true)
+	mockDB.setDBFailure(true)
 
 	numRemoved, err := cleaner.removeRows(context.Background())
 
@@ -48,5 +48,5 @@ func TestRemoveRecordsBackground(t *testing.T) {
 	cancel()
 	time.Sleep(100 * time.Millisecond)
 	removes := mockDB.getRemoveCalls()
-	assert.Assert(t, len(removes) >= 8 && len(removes) <= 11, "expected to have 9-11 remove calls, got %d", len(removes))
+	assert.Assert(t, len(removes) >= 8 && len(removes) <= 11, "expected to have 8-11 remove calls, got %d", len(removes))
 }

@@ -161,7 +161,7 @@ func TestClientFailure(t *testing.T) {
 
 func TestPersistenceFailure(t *testing.T) {
 	mockDB := NewMockDB()
-	mockDB.setPersistenceFailure(true)
+	mockDB.setDBFailure(true)
 	cache := NewEventCache()
 	client := &MockClient{}
 	events := []*si.EventRecord{
@@ -221,9 +221,9 @@ func TestStartIDChangesAfterInitialFetch(t *testing.T) {
 
 	err := writer.fetchAndPersistEvents(context.Background())
 	assert.NilError(t, err)
-	persistence := mockDB.getPersistenceCalls()
-	assert.Equal(t, 1, len(persistence))
-	call := persistence[0]
+	persistenceCalls := mockDB.getPersistenceCalls()
+	assert.Equal(t, 1, len(persistenceCalls))
+	call := persistenceCalls[0]
 	assert.Equal(t, 3, len(call.events))
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(105), call.startEventID)
@@ -249,9 +249,9 @@ func TestEventPersistenceBackground(t *testing.T) {
 	// first round: persistence of two events
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, uint64(5), writer.eventID.Load())
-	persistence := mockDB.getPersistenceCalls()
-	assert.Equal(t, 1, len(persistence))
-	call := persistence[0]
+	persistenceCalls := mockDB.getPersistenceCalls()
+	assert.Equal(t, 1, len(persistenceCalls))
+	call := persistenceCalls[0]
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(3), call.startEventID)
 	assert.Equal(t, 2, len(call.events))
@@ -268,9 +268,9 @@ func TestEventPersistenceBackground(t *testing.T) {
 	client.setContents("yunikornUUID", events, 3, 6)
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, uint64(7), writer.eventID.Load())
-	persistence = mockDB.getPersistenceCalls()
-	assert.Equal(t, 2, len(persistence))
-	call = persistence[1]
+	persistenceCalls = mockDB.getPersistenceCalls()
+	assert.Equal(t, 2, len(persistenceCalls))
+	call = persistenceCalls[1]
 	assert.Equal(t, "yunikornUUID", call.yunikornID)
 	assert.Equal(t, uint64(5), call.startEventID)
 	assert.Equal(t, 2, len(call.events))
@@ -285,9 +285,9 @@ func TestEventPersistenceBackground(t *testing.T) {
 	client.setContents("yunikornUUID-2", events, 0, 1)
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, uint64(2), writer.eventID.Load())
-	persistence = mockDB.getPersistenceCalls()
-	assert.Equal(t, 3, len(persistence))
-	call = persistence[2]
+	persistenceCalls = mockDB.getPersistenceCalls()
+	assert.Equal(t, 3, len(persistenceCalls))
+	call = persistenceCalls[2]
 	assert.Equal(t, "yunikornUUID-2", call.yunikornID)
 	assert.Equal(t, uint64(0), call.startEventID)
 	assert.Equal(t, 2, len(call.events))
@@ -301,7 +301,7 @@ func TestEventPersistenceBackground(t *testing.T) {
 		ObjectID:      "app-1"})
 	client.setContents("yunikornUUID-2", events, 0, 2)
 	time.Sleep(100 * time.Millisecond)
-	persistence = mockDB.getPersistenceCalls()
-	assert.Equal(t, 3, len(persistence))
+	persistenceCalls = mockDB.getPersistenceCalls()
+	assert.Equal(t, 3, len(persistenceCalls))
 	assert.Equal(t, uint64(2), writer.eventID.Load())
 }

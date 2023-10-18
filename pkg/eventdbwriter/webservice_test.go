@@ -100,7 +100,7 @@ func TestBackendFailure(t *testing.T) {
 	req := getRequest()
 	cache := NewEventCache()
 	mockDB := NewMockDB()
-	mockDB.setDbFetchFailure(true)
+	mockDB.setDBFailure(true)
 	web := NewWebService(cache, mockDB)
 
 	web.GetAppEvents(recorder, req, httprouter.Params{

@@ -54,11 +54,21 @@ func (e *EventWriter) Start(ctx context.Context) {
 }
 
 func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
-	events, eventID, err := e.fetchEvents()
+	result, eventID, err := e.fetchEvents(ctx)
 	if err != nil {
+		if result != nil && result.ykError != nil {
+			GetLogger().Error("Received error message from Yunikorn",
+				zap.String("message", result.ykError.Message),
+				zap.String("description", result.ykError.Description),
+				zap.Int("status code", result.ykError.StatusCode))
+			if result.ykError.Message == "Event tracking is disabled" {
+				GetLogger().Error("Event tracking is DISABLED inside Yunikorn. No events are persisted until this is changed.")
+			}
+		}
 		return err
 	}
 
+	events := result.eventRecord
 	uuid := events.InstanceUUID
 	e.storage.SetYunikornID(uuid)
 	if e.checkRestart(uuid) {
@@ -80,7 +90,7 @@ func (e *EventWriter) fetchAndPersistEvents(ctx context.Context) error {
 	return nil
 }
 
-func (e *EventWriter) fetchEvents() (*dao.EventRecordDAO, uint64, error) {
+func (e *EventWriter) fetchEvents(ctx context.Context) (*EventQueryResult, uint64, error) {
 	eventID := e.eventID.Load()
 
 	// Need a tight loop here: if the ring buffer is written quickly,
@@ -92,10 +102,11 @@ func (e *EventWriter) fetchEvents() (*dao.EventRecordDAO, uint64, error) {
 			// make sure we don't retrieve any valid record by accident
 			eventID = math.MaxUint64
 		}
-		events, err := e.client.GetRecentEvents(eventID)
+		result, err := e.client.GetRecentEvents(ctx, eventID)
 		if err != nil {
-			return nil, 0, err
+			return result, 0, err
 		}
+		events := result.eventRecord
 
 		if !e.haveEventID || (len(events.EventRecords) == 0 && events.LowestID > eventID) {
 			if e.haveEventID {
@@ -112,7 +123,7 @@ func (e *EventWriter) fetchEvents() (*dao.EventRecordDAO, uint64, error) {
 			continue
 		}
 
-		return events, eventID, nil
+		return result, eventID, nil
 	}
 }
 

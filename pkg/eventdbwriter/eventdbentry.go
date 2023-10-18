@@ -13,16 +13,16 @@ const maxResourceSize = 1024
 
 // EventDBEntry Database row object for GORM
 type EventDBEntry struct {
-	YunikornID   string    `gorm:"column:yunikorn_id;primarykey;size:64"`
-	EventID      uint64    `gorm:"column:event_id;primarykey;not null"`
-	Type         int32     `gorm:"column:type;not null"`
-	ObjectID     string    `gorm:"column:objectID;not null;size:64"`
-	ReferenceID  string    `gorm:"column:referenceID;size:64"`
-	Message      string    `gorm:"column:message;size:64"`
-	Timestamp    time.Time `gorm:"column:time;not null"`
-	ChangeType   int32     `gorm:"column:changeType;not null"`
-	ChangeDetail int32     `gorm:"column:changeDetail;not null"`
-	Resource     string    `gorm:"column:resource;size:1024"`
+	YunikornID   string    `gorm:"primarykey;not null;size:36"`
+	EventID      uint64    `gorm:"primarykey;not null"`
+	Type         int32     `gorm:"not null"`
+	ObjectID     string    `gorm:"not null;size:64"`
+	ReferenceID  string    `gorm:"size:64"`
+	Message      string    `gorm:"size:64"`
+	Timestamp    time.Time `gorm:"not null"`
+	ChangeType   int32     `gorm:"not null"`
+	ChangeDetail int32     `gorm:"not null"`
+	Resource     string
 }
 
 func entryFromSI(yunikornID string, eventID uint64, event *si.EventRecord) *EventDBEntry {

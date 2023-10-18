@@ -3,10 +3,13 @@ package eventdbwriter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"go.uber.org/zap"
 
 	"github.com/apache/yunikorn-core/pkg/webservice/dao"
 )
@@ -14,7 +17,12 @@ import (
 const eventPath = "/ws/v1/events/batch"
 
 type YunikornClient interface {
-	GetRecentEvents(startID uint64) (*dao.EventRecordDAO, error)
+	GetRecentEvents(ctx context.Context, startID uint64) (*EventQueryResult, error)
+}
+
+type EventQueryResult struct {
+	eventRecord *dao.EventRecordDAO
+	ykError     *dao.YAPIError
 }
 
 type HttpClient struct {
@@ -27,19 +35,22 @@ func NewHttpClient(host string) *HttpClient {
 	}
 }
 
-func (h *HttpClient) GetRecentEvents(startID uint64) (*dao.EventRecordDAO, error) {
-	req, err := h.newRequest(startID)
-	req = req.WithContext(context.Background())
+func (h *HttpClient) GetRecentEvents(ctx context.Context, startID uint64) (*EventQueryResult, error) {
+	req, err := h.newRequest(ctx, startID)
 	if err != nil {
 		return nil, err
 	}
 	var events dao.EventRecordDAO
-	_, err = h.do(req, &events)
+	var ykErr dao.YAPIError
+	err = h.do(req, &events, &ykErr)
 
-	return &events, err
+	return &EventQueryResult{
+		eventRecord: &events,
+		ykError:     &ykErr,
+	}, err
 }
 
-func (h *HttpClient) newRequest(startID uint64) (*http.Request, error) {
+func (h *HttpClient) newRequest(ctx context.Context, startID uint64) (*http.Request, error) {
 	rel := &url.URL{Path: eventPath}
 	wsUrl := &url.URL{
 		Host:   h.host,
@@ -48,7 +59,7 @@ func (h *HttpClient) newRequest(startID uint64) (*http.Request, error) {
 	u := wsUrl.ResolveReference(rel)
 	u.RawQuery = "start=" + strconv.FormatUint(startID, 10)
 	var buf io.ReadWriter
-	req, err := http.NewRequest("GET", u.String(), buf)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), buf)
 	if err != nil {
 		return nil, err
 	}
@@ -57,12 +68,25 @@ func (h *HttpClient) newRequest(startID uint64) (*http.Request, error) {
 	return req, nil
 }
 
-func (h *HttpClient) do(req *http.Request, v interface{}) (*http.Response, error) {
+func (h *HttpClient) do(req *http.Request, eventRecord *dao.EventRecordDAO, ykErr *dao.YAPIError) error {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
-	err = json.NewDecoder(resp.Body).Decode(v)
-	return resp, err
+
+	code := resp.StatusCode
+	if code != http.StatusOK {
+		GetLogger().Warn("HTTP status was not OK", zap.Int("code", code))
+		// attempt to unmarshal body as a Yunikorn error object
+		err = json.NewDecoder(resp.Body).Decode(ykErr)
+		if err != nil {
+			// make sure that an error is always returned
+			return fmt.Errorf("unexpected HTTP status code %d", code)
+		}
+		return err
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(eventRecord)
+	return err
 }

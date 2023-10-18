@@ -27,9 +27,7 @@ type MockDB struct {
 	numRemoved       int64
 	ykID             string
 
-	persistFails   bool
-	getEventsFails bool
-	removeFails    bool
+	dbFailure bool
 
 	sync.Mutex
 }
@@ -57,7 +55,7 @@ func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events [
 		events:       events,
 	})
 
-	if ms.persistFails {
+	if ms.dbFailure {
 		return fmt.Errorf("error while storing events")
 	}
 
@@ -68,7 +66,7 @@ func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.Eve
 	ms.Lock()
 	defer ms.Unlock()
 
-	if ms.getEventsFails {
+	if ms.dbFailure {
 		return nil, fmt.Errorf("error while fetching events")
 	}
 
@@ -90,7 +88,7 @@ func (ms *MockDB) RemoveObsoleteEntries(_ context.Context, cutoff time.Time) (in
 		cutoff: cutoff,
 	})
 
-	if ms.removeFails {
+	if ms.dbFailure {
 		return 0, fmt.Errorf("error while removing records")
 	}
 
@@ -103,22 +101,10 @@ func (ms *MockDB) setEvents(events []*si.EventRecord) {
 	ms.events = events
 }
 
-func (ms *MockDB) setPersistenceFailure(b bool) {
+func (ms *MockDB) setDBFailure(b bool) {
 	ms.Lock()
 	defer ms.Unlock()
-	ms.persistFails = b
-}
-
-func (ms *MockDB) setRemoveFailure(b bool) {
-	ms.Lock()
-	defer ms.Unlock()
-	ms.removeFails = b
-}
-
-func (ms *MockDB) setDbFetchFailure(b bool) {
-	ms.Lock()
-	defer ms.Unlock()
-	ms.getEventsFails = b
+	ms.dbFailure = b
 }
 
 func (ms *MockDB) setNumRemoved(n int64) {
@@ -156,7 +142,7 @@ type MockClient struct {
 	sync.Mutex
 }
 
-func (mc *MockClient) GetRecentEvents(start uint64) (*dao.EventRecordDAO, error) {
+func (mc *MockClient) GetRecentEvents(_ context.Context, start uint64) (*EventQueryResult, error) {
 	mc.Lock()
 	defer mc.Unlock()
 
@@ -182,21 +168,25 @@ func (mc *MockClient) GetRecentEvents(start uint64) (*dao.EventRecordDAO, error)
 	}
 
 	if len(filtered) == 0 {
-		return &dao.EventRecordDAO{
-			InstanceUUID: mc.ykID,
-			LowestID:     mc.low,
-			HighestID:    mc.high,
+		return &EventQueryResult{
+			eventRecord: &dao.EventRecordDAO{
+				InstanceUUID: mc.ykID,
+				LowestID:     mc.low,
+				HighestID:    mc.high,
+			},
 		}, nil
 	}
 
 	lowest := responseLow
 	highest := id - 1
 
-	return &dao.EventRecordDAO{
-		InstanceUUID: mc.ykID,
-		LowestID:     lowest,
-		HighestID:    highest,
-		EventRecords: filtered,
+	return &EventQueryResult{
+		eventRecord: &dao.EventRecordDAO{
+			InstanceUUID: mc.ykID,
+			LowestID:     lowest,
+			HighestID:    highest,
+			EventRecords: filtered,
+		},
 	}, nil
 }
 
@@ -215,6 +205,7 @@ func (mc *MockClient) setContents(ykID string, events []*si.EventRecord, low, hi
 	mc.high = high
 }
 
+// invoked from callback onGetEvents
 func (mc *MockClient) setContentsNoLock(ykID string, events []*si.EventRecord, low, high uint64) {
 	mc.events = events
 	mc.ykID = ykID
@@ -228,6 +219,7 @@ func (mc *MockClient) setOnGetEvents(f func(uint64)) {
 	mc.onGetEvents = f
 }
 
+// invoked from callback onGetEvents
 func (mc *MockClient) setOnGetEventsNoLock(f func(uint64)) {
 	mc.onGetEvents = f
 }
