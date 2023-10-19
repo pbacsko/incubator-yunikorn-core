@@ -40,13 +40,12 @@ func (h *HttpClient) GetRecentEvents(ctx context.Context, startID uint64) (*Even
 	if err != nil {
 		return nil, err
 	}
-	var events dao.EventRecordDAO
-	var ykErr dao.YAPIError
-	err = h.do(req, &events, &ykErr)
+
+	events, ykErr, err := h.do(req)
 
 	return &EventQueryResult{
-		eventRecord: &events,
-		ykError:     &ykErr,
+		eventRecord: events,
+		ykError:     ykErr,
 	}, err
 }
 
@@ -68,10 +67,10 @@ func (h *HttpClient) newRequest(ctx context.Context, startID uint64) (*http.Requ
 	return req, nil
 }
 
-func (h *HttpClient) do(req *http.Request, eventRecord *dao.EventRecordDAO, ykErr *dao.YAPIError) error {
+func (h *HttpClient) do(req *http.Request) (*dao.EventRecordDAO, *dao.YAPIError, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
@@ -79,14 +78,19 @@ func (h *HttpClient) do(req *http.Request, eventRecord *dao.EventRecordDAO, ykEr
 	if code != http.StatusOK {
 		GetLogger().Warn("HTTP status was not OK", zap.Int("code", code))
 		// attempt to unmarshal body as a Yunikorn error object
-		err = json.NewDecoder(resp.Body).Decode(ykErr)
+		var ykErr dao.YAPIError
+		err = json.NewDecoder(resp.Body).Decode(&ykErr)
 		if err != nil {
 			// make sure that an error is always returned
-			return fmt.Errorf("unexpected HTTP status code %d", code)
+			return nil, nil, fmt.Errorf("unexpected HTTP status code %d", code)
 		}
-		return err
+		return nil, &ykErr, nil
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(eventRecord)
-	return err
+	var eventRecord dao.EventRecordDAO
+	err = json.NewDecoder(resp.Body).Decode(&eventRecord)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &eventRecord, nil, nil
 }
