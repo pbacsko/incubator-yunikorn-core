@@ -84,7 +84,7 @@ func (h *HttpClient) do(req *http.Request) (*dao.EventRecordDAO, *dao.YAPIError,
 			// make sure that an error is always returned
 			return nil, nil, fmt.Errorf("unexpected HTTP status code %d", code)
 		}
-		return nil, &ykErr, nil
+		return nil, &ykErr, fmt.Errorf("error received from Yunikorn: %s", ykErr.Message)
 	}
 
 	var eventRecord dao.EventRecordDAO

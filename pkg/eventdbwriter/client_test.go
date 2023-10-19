@@ -3,8 +3,6 @@ package eventdbwriter
 import (
 	"context"
 	"encoding/json"
-	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
-	"gotest.tools/v3/assert"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,30 +10,26 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	"gotest.tools/v3/assert"
 
 	"github.com/apache/yunikorn-core/pkg/webservice/dao"
-)
-
-type handlerMode int
-
-const (
-	sendBadRequest handlerMode = iota
-	sendInternalServerError
-	sendTrackingNotEnabled
-	sendNormalResponse
+	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
 func TestHttpClient(t *testing.T) {
-	handler := &requestHandler{t: t}
+	handler := &requestHandler{}
 	httpServer := setupWebServer(handler)
 	defer httpServer.Close()
 	go func() {
-		httpServer.ListenAndServe()
+		httpServer.ListenAndServe() //nolint:errcheck
 	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// send Bad request (no payload)
-	handler.setMode(sendBadRequest)
+	handler.setHandler(func(w http.ResponseWriter) {
+		writeHeaders(w)
+		w.WriteHeader(http.StatusBadRequest)
+	})
 	client := NewHttpClient("localhost:9998")
 	response, err := client.GetRecentEvents(context.Background(), 0)
 	assert.ErrorContains(t, err, "unexpected HTTP status code 400")
@@ -43,7 +37,10 @@ func TestHttpClient(t *testing.T) {
 	assert.Assert(t, response.eventRecord == nil)
 
 	// send Internal server error (no payload)
-	handler.setMode(sendInternalServerError)
+	handler.setHandler(func(w http.ResponseWriter) {
+		writeHeaders(w)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
 	client = NewHttpClient("localhost:9998")
 	response, err = client.GetRecentEvents(context.Background(), 0)
 	assert.ErrorContains(t, err, "unexpected HTTP status code 500")
@@ -51,9 +48,18 @@ func TestHttpClient(t *testing.T) {
 	assert.Assert(t, response.eventRecord == nil)
 
 	// send YK error back
-	handler.setMode(sendTrackingNotEnabled)
+	handler.setHandler(func(w http.ResponseWriter) {
+		writeHeaders(w)
+		code := http.StatusBadRequest
+		w.WriteHeader(code)
+		errorInfo := dao.NewYAPIError(nil, code, "Event tracking is disabled")
+		if jsonErr := json.NewEncoder(w).Encode(errorInfo); jsonErr != nil {
+			panic(jsonErr)
+		}
+	})
 	client = NewHttpClient("localhost:9998")
 	response, err = client.GetRecentEvents(context.Background(), 0)
+	assert.ErrorContains(t, err, "error received from Yunikorn: Event tracking is disabled")
 	assert.Assert(t, response.ykError != nil)
 	assert.Assert(t, strings.Contains(response.ykError.Description, "Event tracking is disabled"))
 	assert.Assert(t, strings.Contains(response.ykError.Description, "Event tracking is disabled"))
@@ -61,9 +67,24 @@ func TestHttpClient(t *testing.T) {
 	assert.Assert(t, response.eventRecord == nil)
 
 	// send normal response
-	handler.setMode(sendNormalResponse)
+	handler.setHandler(func(w http.ResponseWriter) {
+		writeHeaders(w)
+		w.WriteHeader(http.StatusOK)
+		if jsonErr := json.NewEncoder(w).Encode(dao.EventRecordDAO{
+			InstanceUUID: "uuid-0",
+			LowestID:     100,
+			HighestID:    200,
+			EventRecords: []*si.EventRecord{
+				{TimestampNano: 123, Type: si.EventRecord_APP},
+				{TimestampNano: 456, Type: si.EventRecord_NODE},
+			},
+		}); jsonErr != nil {
+			panic(jsonErr)
+		}
+	})
 	client = NewHttpClient("localhost:9998")
 	response, err = client.GetRecentEvents(context.Background(), 0)
+	assert.NilError(t, err)
 	assert.Assert(t, response.eventRecord != nil)
 	assert.Equal(t, uint64(100), response.eventRecord.LowestID)
 	assert.Equal(t, uint64(200), response.eventRecord.HighestID)
@@ -83,75 +104,26 @@ func setupWebServer(handler *requestHandler) *http.Server {
 }
 
 type requestHandler struct {
-	mode handlerMode
-	t    *testing.T
-
+	handler func(w http.ResponseWriter)
 	sync.Mutex
 }
 
-func (h *requestHandler) setMode(m handlerMode) {
+func (h *requestHandler) setHandler(f func(w http.ResponseWriter)) {
 	h.Lock()
 	defer h.Unlock()
-	h.mode = m
+	h.handler = f
 }
 
 func (h *requestHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
-	switch h.mode {
-	case sendInternalServerError:
-		h.sendInternalServerError(w)
-		return
-	case sendBadRequest:
-		h.sendBadRequest(w)
-		return
-	case sendNormalResponse:
-		h.sendNormalResponse(w)
-		return
-	case sendTrackingNotEnabled:
-		h.sendTrackingNotEnabled(w)
-		return
+	fn := h.getHandler()
+	if fn == nil {
+		panic("handler function is unset")
 	}
+	fn(w)
 }
 
-func (h *requestHandler) sendInternalServerError(w http.ResponseWriter) {
-	h.writeHeaders(w)
-	w.WriteHeader(http.StatusInternalServerError)
-}
-
-func (h *requestHandler) sendBadRequest(w http.ResponseWriter) {
-	h.writeHeaders(w)
-	w.WriteHeader(http.StatusBadRequest)
-}
-
-func (h *requestHandler) sendNormalResponse(w http.ResponseWriter) {
-	h.writeHeaders(w)
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(dao.EventRecordDAO{
-		InstanceUUID: "uuid-0",
-		LowestID:     100,
-		HighestID:    200,
-		EventRecords: []*si.EventRecord{
-			{TimestampNano: 123, Type: si.EventRecord_APP},
-			{TimestampNano: 456, Type: si.EventRecord_NODE},
-		},
-	}); err != nil {
-		h.t.Fatalf("%v", err)
-	}
-}
-
-func (h *requestHandler) sendTrackingNotEnabled(w http.ResponseWriter) {
-	h.writeHeaders(w)
-	code := http.StatusBadRequest
-	w.WriteHeader(code)
-	errorInfo := dao.NewYAPIError(nil, code, "Event tracking is disabled")
-	if err := json.NewEncoder(w).Encode(errorInfo); err != nil {
-		h.t.Fatalf("%v", err)
-	}
-}
-
-func (h *requestHandler) writeHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
-	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,HEAD,OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "X-Requested-With,Content-Type,Accept,Origin")
+func (h *requestHandler) getHandler() func(w http.ResponseWriter) {
+	h.Lock()
+	defer h.Unlock()
+	return h.handler
 }
