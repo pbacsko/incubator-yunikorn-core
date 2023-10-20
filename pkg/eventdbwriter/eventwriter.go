@@ -46,7 +46,7 @@ func (e *EventWriter) Start(ctx context.Context) {
 			case <-time.After(e.eventFetchPeriod):
 				err := e.fetchAndPersistEvents(ctx)
 				if err != nil {
-					GetLogger().Error("Unable to fetch events from Yunikorn", zap.Error(err))
+					GetLogger().Error("Unable to read/save events from Yunikorn", zap.Error(err))
 				}
 			}
 		}

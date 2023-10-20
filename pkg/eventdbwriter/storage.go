@@ -18,6 +18,7 @@ type Driver string
 const (
 	MySQL    Driver = "mysql"
 	Postgres Driver = "postgres"
+	RamSQL   Driver = "ramsql"
 )
 
 type DBInfo struct {

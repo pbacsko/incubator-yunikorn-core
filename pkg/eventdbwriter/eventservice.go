@@ -89,6 +89,17 @@ func openDBSession(dbInfo DBInfo) (*gorm.DB, error) {
 		if db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{}); err != nil {
 			return nil, fmt.Errorf("error creating DB session for '%s', error: %w", dbInfo.Driver, err)
 		}
+	case RamSQL:
+		var ramdb *sql.DB
+		ramdb, err = sql.Open("ramsql", "test")
+		if err != nil {
+			return nil, fmt.Errorf("could not create ramdb instance, error: %w", err)
+		}
+		db, err = gorm.Open(postgres.New(postgres.Config{
+			Conn: ramdb}), &gorm.Config{})
+		if err != nil {
+			return nil, fmt.Errorf("error creating DB session for '%s', error: %w", dbInfo.Driver, err)
+		}
 	default:
 		return nil, fmt.Errorf("unrecognized DB driver: %s", dbInfo.Driver)
 	}
