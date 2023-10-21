@@ -12,7 +12,7 @@ import (
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
-const defaultFetchPeriod = 2 * time.Second
+const defaultFetchPeriod = time.Second
 
 // EventWriter periodically retrieves events from Yunikorn and persists them by using
 // the underlying storage object.

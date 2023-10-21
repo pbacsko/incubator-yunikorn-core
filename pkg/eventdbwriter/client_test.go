@@ -26,29 +26,29 @@ func TestHttpClient(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// send Bad request (no payload)
-	handler.setHandler(func(w http.ResponseWriter) {
+	handler.setHandler(func(w http.ResponseWriter, _ *http.Request) {
 		writeHeaders(w)
 		w.WriteHeader(http.StatusBadRequest)
 	})
-	client := NewHttpClient("localhost:9998")
+	client := NewHttpClient("localhost:9080")
 	response, err := client.GetRecentEvents(context.Background(), 0)
 	assert.ErrorContains(t, err, "unexpected HTTP status code 400")
 	assert.Assert(t, response.ykError == nil)
 	assert.Assert(t, response.eventRecord == nil)
 
 	// send Internal server error (no payload)
-	handler.setHandler(func(w http.ResponseWriter) {
+	handler.setHandler(func(w http.ResponseWriter, _ *http.Request) {
 		writeHeaders(w)
 		w.WriteHeader(http.StatusInternalServerError)
 	})
-	client = NewHttpClient("localhost:9998")
+	client = NewHttpClient("localhost:9080")
 	response, err = client.GetRecentEvents(context.Background(), 0)
 	assert.ErrorContains(t, err, "unexpected HTTP status code 500")
 	assert.Assert(t, response.ykError == nil)
 	assert.Assert(t, response.eventRecord == nil)
 
 	// send YK error back
-	handler.setHandler(func(w http.ResponseWriter) {
+	handler.setHandler(func(w http.ResponseWriter, _ *http.Request) {
 		writeHeaders(w)
 		code := http.StatusBadRequest
 		w.WriteHeader(code)
@@ -57,7 +57,7 @@ func TestHttpClient(t *testing.T) {
 			panic(jsonErr)
 		}
 	})
-	client = NewHttpClient("localhost:9998")
+	client = NewHttpClient("localhost:9080")
 	response, err = client.GetRecentEvents(context.Background(), 0)
 	assert.ErrorContains(t, err, "error received from Yunikorn: Event tracking is disabled")
 	assert.Assert(t, response.ykError != nil)
@@ -67,7 +67,7 @@ func TestHttpClient(t *testing.T) {
 	assert.Assert(t, response.eventRecord == nil)
 
 	// send normal response
-	handler.setHandler(func(w http.ResponseWriter) {
+	handler.setHandler(func(w http.ResponseWriter, _ *http.Request) {
 		writeHeaders(w)
 		w.WriteHeader(http.StatusOK)
 		if jsonErr := json.NewEncoder(w).Encode(dao.EventRecordDAO{
@@ -82,7 +82,7 @@ func TestHttpClient(t *testing.T) {
 			panic(jsonErr)
 		}
 	})
-	client = NewHttpClient("localhost:9998")
+	client = NewHttpClient("localhost:9080")
 	response, err = client.GetRecentEvents(context.Background(), 0)
 	assert.NilError(t, err)
 	assert.Assert(t, response.eventRecord != nil)
@@ -96,33 +96,33 @@ func TestHttpClient(t *testing.T) {
 	assert.Equal(t, int64(456), response.eventRecord.EventRecords[1].TimestampNano)
 }
 
-func setupWebServer(handler *requestHandler) *http.Server {
+func setupWebServer(handler http.Handler) *http.Server {
 	router := httprouter.New()
 	router.Handler("GET", "/ws/v1/events/batch", handler)
-	httpServer := &http.Server{Addr: ":9998", Handler: router, ReadHeaderTimeout: time.Second}
+	httpServer := &http.Server{Addr: ":9080", Handler: router, ReadHeaderTimeout: time.Second}
 	return httpServer
 }
 
 type requestHandler struct {
-	handler func(w http.ResponseWriter)
+	handler func(w http.ResponseWriter, r *http.Request)
 	sync.Mutex
 }
 
-func (h *requestHandler) setHandler(f func(w http.ResponseWriter)) {
+func (h *requestHandler) setHandler(f func(w http.ResponseWriter, r *http.Request)) {
 	h.Lock()
 	defer h.Unlock()
 	h.handler = f
 }
 
-func (h *requestHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+func (h *requestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fn := h.getHandler()
 	if fn == nil {
 		panic("handler function is unset")
 	}
-	fn(w)
+	fn(w, r)
 }
 
-func (h *requestHandler) getHandler() func(w http.ResponseWriter) {
+func (h *requestHandler) getHandler() func(w http.ResponseWriter, r *http.Request) {
 	h.Lock()
 	defer h.Unlock()
 	return h.handler

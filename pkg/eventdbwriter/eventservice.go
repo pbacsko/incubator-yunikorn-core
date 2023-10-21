@@ -91,9 +91,9 @@ func openDBSession(dbInfo DBInfo) (*gorm.DB, error) {
 		}
 	case RamSQL:
 		var ramdb *sql.DB
-		ramdb, err = sql.Open("ramsql", "test")
+		ramdb, err = sql.Open("ramsql", time.Now().String())
 		if err != nil {
-			return nil, fmt.Errorf("could not create ramdb instance, error: %w", err)
+			return nil, fmt.Errorf("could not create ramsql instance, error: %w", err)
 		}
 		db, err = gorm.Open(postgres.New(postgres.Config{
 			Conn: ramdb}), &gorm.Config{})
