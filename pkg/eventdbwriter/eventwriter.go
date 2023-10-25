@@ -2,6 +2,7 @@ package eventdbwriter
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync/atomic"
 	"time"
@@ -12,7 +13,13 @@ import (
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
+// replaceable for testing
+var idOutOfSyncErr = func(msg string) {
+	panic(msg)
+}
+
 const defaultFetchPeriod = time.Second
+const defaultRetryWaitTime = time.Second
 
 // EventWriter periodically retrieves events from Yunikorn and persists them by using
 // the underlying storage object.
@@ -23,8 +30,10 @@ type EventWriter struct {
 	ykID        string        // yunikorn instance ID
 	eventID     atomic.Uint64 // current lowest event id for event retrieval, passed to the client
 	haveEventID bool          // whether we have id set or not
+	firstCycle  bool          // whether we're performing the first fetch&persist cycle
 
 	eventFetchPeriod time.Duration
+	dbRetry          time.Duration
 }
 
 func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *EventWriter {
@@ -33,7 +42,9 @@ func NewEventWriter(storage Storage, client YunikornClient, cache *EventCache) *
 		client:           client,
 		cache:            cache,
 		eventFetchPeriod: defaultFetchPeriod,
+		dbRetry:          defaultRetryWaitTime,
 		haveEventID:      false,
+		firstCycle:       true,
 	}
 }
 
@@ -115,15 +126,56 @@ func (e *EventWriter) fetchEvents(ctx context.Context) (*EventQueryResult, uint6
 			} else {
 				GetLogger().Info("Setting valid event ID",
 					zap.Uint64("new", events.LowestID))
+				GetLogger().Info("Yunikorn instance UUID", zap.String("value", events.InstanceUUID))
 			}
 
 			e.eventID.Store(events.LowestID)
 			e.haveEventID = true
 			eventID = events.LowestID
+
+			if e.firstCycle {
+				// first call, check DB contents to avoid re-persisting existing events
+				lastID, lastEvent := e.getLastEventFromDB(ctx, events)
+				e.firstCycle = false
+
+				if lastEvent == nil {
+					GetLogger().Info("No rows in the database")
+					continue
+				}
+				GetLogger().Info("Last event in the backend storage",
+					zap.Uint64("id", lastID), zap.Any("event object", lastEvent))
+
+				// should not happen - more events in the DB
+				if lastID > events.HighestID {
+					idOutOfSyncErr(fmt.Sprintf("The largest event ID in the database (%d) is greater than"+
+						" the one which was returned by Yunikorn (%d). Cannot persist more events until this"+
+						" inconsistency is resolved.", lastID, events.HighestID))
+				}
+				if eventID < lastID {
+					GetLogger().Info("Adjusting eventID based on the ID found in the database",
+						zap.Uint64("previous", eventID),
+						zap.Uint64("new", lastID+1))
+					eventID = lastID + 1
+					e.eventID.Store(eventID)
+				}
+			}
 			continue
 		}
 
 		return result, eventID, nil
+	}
+}
+
+func (e *EventWriter) getLastEventFromDB(ctx context.Context, events *dao.EventRecordDAO) (uint64, *si.EventRecord) {
+	GetLogger().Info("Retrieving the last event from the DB")
+	for {
+		id, event, err := e.storage.GetLastEvent(ctx, events.InstanceUUID)
+		if err != nil {
+			GetLogger().Error("Database error, retrying", zap.Error(err))
+			time.Sleep(e.dbRetry)
+			continue
+		}
+		return id, event
 	}
 }
 
@@ -154,6 +206,7 @@ func (e *EventWriter) persistEvents(ctx context.Context, eventID uint64, events 
 			// we have the first event from an app, so it's safe to read the history back from the cache w/o DB access
 			if event.EventChangeType == si.EventRecord_ADD && event.EventChangeDetail == si.EventRecord_DETAILS_NONE {
 				e.cache.SetHaveFullHistory(event.ObjectID)
+				GetLogger().Info("New application", zap.String("appID", event.ObjectID))
 			}
 		}
 	}

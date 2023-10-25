@@ -35,11 +35,37 @@ type Storage interface {
 	GetAllEventsForApp(ctx context.Context, appID string) ([]*si.EventRecord, error)
 	SetYunikornID(yunikornID string)
 	RemoveObsoleteEntries(ctx context.Context, cutoff time.Time) (int64, error)
+	GetLastEvent(ctx context.Context, ykID string) (uint64, *si.EventRecord, error)
 }
 
 type DBStorage struct {
 	db         *gorm.DB
 	yunikornID atomic.Value
+}
+
+func (s *DBStorage) GetLastEvent(ctx context.Context, ykID string) (uint64, *si.EventRecord, error) {
+	var result EventDBEntry
+	hasResult := false
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// temporary
+		var count int64
+		s.db.Table("event_db_entries").Count(&count)
+		if count == 0 {
+			return nil
+		}
+		err := s.db.Last(&result, "yunikorn_id = ?", ykID).Error
+		hasResult = true
+		return err
+	}); err != nil {
+		return 0, nil, err
+	}
+
+	if !hasResult {
+		return 0, nil, nil
+	}
+
+	event := siFromEntry(result)
+	return result.EventID, event, nil
 }
 
 func NewDBStorage(db *gorm.DB) *DBStorage {

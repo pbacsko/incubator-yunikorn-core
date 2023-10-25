@@ -3,6 +3,7 @@ package eventdbwriter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	_ "github.com/proullon/ramsql/driver"
 )
 
+// full integration test with in-memory SQL and Yunikorn REST API mock
 func TestEventService(t *testing.T) {
 	handler := &testHandler{}
 	httpServer := setupWebServer(handler)
@@ -120,7 +122,8 @@ func (th *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	var startStr string
 	if startStr = r.URL.Query().Get("start"); startStr == "" {
-		panic("no start defined in the URL query")
+		th.err = errors.New("no start defined in the URL query")
+		return
 	}
 	start, err := strconv.ParseUint(startStr, 10, 64)
 	if err != nil {

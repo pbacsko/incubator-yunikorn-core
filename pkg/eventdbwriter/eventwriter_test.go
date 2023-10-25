@@ -170,6 +170,7 @@ func TestPersistenceFailure(t *testing.T) {
 	}
 	client.setContents("yunikornUUID", events, 0, 1)
 	writer := NewEventWriter(mockDB, client, cache)
+	writer.firstCycle = false
 
 	err := writer.fetchAndPersistEvents(context.Background())
 	assert.ErrorContains(t, err, "error while storing events")
@@ -230,6 +231,73 @@ func TestStartIDChangesAfterInitialFetch(t *testing.T) {
 	assert.Equal(t, int64(100), call.events[0].TimestampNano)
 	assert.Equal(t, int64(200), call.events[1].TimestampNano)
 	assert.Equal(t, int64(300), call.events[2].TimestampNano)
+}
+
+func TestLastIDInconsistency(t *testing.T) {
+	mockDB := NewMockDB()
+	client := &MockClient{}
+	events := []*si.EventRecord{
+		{TimestampNano: 100, ObjectID: "app-1"},
+		{TimestampNano: 200, ObjectID: "app-1"},
+	}
+	client.setContents("yunikornUUID", events, 0, 1)
+	mockDB.setLastEventData(4, &si.EventRecord{})
+	var syncErrMsg string
+	idOutOfSyncErr = func(msg string) {
+		syncErrMsg = msg
+	}
+	defer func() {
+		idOutOfSyncErr = func(msg string) {
+			panic(msg)
+		}
+	}()
+
+	writer := NewEventWriter(mockDB, client, NewEventCache())
+	writer.fetchEvents(context.Background()) //nolint:errcheck
+	assert.Equal(t, "The largest event ID in the database (4) is greater than the one which was returned by Yunikorn (1). Cannot persist more events until this inconsistency is resolved.", syncErrMsg)
+}
+
+func TestLastIDAdjusted(t *testing.T) {
+	mockDB := NewMockDB()
+	client := &MockClient{}
+	events := []*si.EventRecord{
+		{TimestampNano: 100, ObjectID: "app-1"},
+		{TimestampNano: 200, ObjectID: "app-1"},
+	}
+	client.setContents("yunikornUUID", events, 0, 1)
+	mockDB.setLastEventData(1, &si.EventRecord{})
+
+	writer := NewEventWriter(mockDB, client, NewEventCache())
+	_, _, err := writer.fetchEvents(context.Background())
+	assert.NilError(t, err)
+	assert.Equal(t, uint64(2), writer.eventID.Load())
+}
+
+func TestGetLastEventFailure(t *testing.T) {
+	mockDB := NewMockDB()
+	client := &MockClient{}
+	events := []*si.EventRecord{
+		{TimestampNano: 100, ObjectID: "app-1"},
+		{TimestampNano: 200, ObjectID: "app-1"},
+	}
+	client.setContents("yunikornUUID", events, 0, 1)
+	mockDB.setLastEventData(1, &si.EventRecord{})
+	mockDB.setDBFailure(true)
+	writer := NewEventWriter(mockDB, client, NewEventCache())
+	writer.dbRetry = 10 * time.Millisecond
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		mockDB.setDBFailure(false)
+	}()
+
+	_, _, err := writer.fetchEvents(context.Background())
+	assert.NilError(t, err)
+	calls := mockDB.getLastEventCalls()
+	for _, c := range calls {
+		assert.Equal(t, "yunikornUUID", c.ykID)
+	}
+	assert.Assert(t, len(calls) >= 8 && len(calls) <= 11, "expected to have 8-11 GetLastEvent calls, got %d", len(calls))
 }
 
 func TestEventPersistenceBackground(t *testing.T) {

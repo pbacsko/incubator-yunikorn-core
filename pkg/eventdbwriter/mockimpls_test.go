@@ -2,7 +2,7 @@ package eventdbwriter
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -20,16 +20,29 @@ type RemoveCall struct {
 	cutoff time.Time
 }
 
+type LastEventCall struct {
+	ykID string
+}
+
 type MockDB struct {
 	events           []*si.EventRecord
 	persistenceCalls []PersistenceCall
 	removeCalls      []RemoveCall
+	lastEventCalls   []LastEventCall
 	numRemoved       int64
 	ykID             string
+	lastEvent        *si.EventRecord
+	lastID           uint64
 
 	dbFailure bool
 
 	sync.Mutex
+}
+
+func NewMockDB() *MockDB {
+	return &MockDB{
+		events: make([]*si.EventRecord, 0),
+	}
 }
 
 func (ms *MockDB) SetYunikornID(yunikornID string) {
@@ -37,12 +50,6 @@ func (ms *MockDB) SetYunikornID(yunikornID string) {
 	defer ms.Unlock()
 
 	ms.ykID = yunikornID
-}
-
-func NewMockDB() *MockDB {
-	return &MockDB{
-		events: make([]*si.EventRecord, 0),
-	}
 }
 
 func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events []*si.EventRecord) error {
@@ -56,7 +63,7 @@ func (ms *MockDB) PersistEvents(_ context.Context, startEventID uint64, events [
 	})
 
 	if ms.dbFailure {
-		return fmt.Errorf("error while storing events")
+		return errors.New("error while storing events")
 	}
 
 	return nil
@@ -67,7 +74,7 @@ func (ms *MockDB) GetAllEventsForApp(_ context.Context, appID string) ([]*si.Eve
 	defer ms.Unlock()
 
 	if ms.dbFailure {
-		return nil, fmt.Errorf("error while fetching events")
+		return nil, errors.New("error while fetching events")
 	}
 
 	var result []*si.EventRecord
@@ -89,16 +96,37 @@ func (ms *MockDB) RemoveObsoleteEntries(_ context.Context, cutoff time.Time) (in
 	})
 
 	if ms.dbFailure {
-		return 0, fmt.Errorf("error while removing records")
+		return 0, errors.New("error while removing records")
 	}
 
 	return ms.numRemoved, nil
+}
+
+func (ms *MockDB) GetLastEvent(_ context.Context, ykID string) (uint64, *si.EventRecord, error) {
+	ms.Lock()
+	defer ms.Unlock()
+
+	ms.lastEventCalls = append(ms.lastEventCalls, LastEventCall{
+		ykID: ykID,
+	})
+	if ms.dbFailure {
+		return 0, nil, errors.New("error while fetching events")
+	}
+
+	return ms.lastID, ms.lastEvent, nil
 }
 
 func (ms *MockDB) setEvents(events []*si.EventRecord) {
 	ms.Lock()
 	defer ms.Unlock()
 	ms.events = events
+}
+
+func (ms *MockDB) setLastEventData(lastID uint64, event *si.EventRecord) {
+	ms.Lock()
+	defer ms.Unlock()
+	ms.lastID = lastID
+	ms.lastEvent = event
 }
 
 func (ms *MockDB) setDBFailure(b bool) {
@@ -123,6 +151,12 @@ func (ms *MockDB) getPersistenceCalls() []PersistenceCall {
 	ms.Lock()
 	defer ms.Unlock()
 	return ms.persistenceCalls
+}
+
+func (ms *MockDB) getLastEventCalls() []LastEventCall {
+	ms.Lock()
+	defer ms.Unlock()
+	return ms.lastEventCalls
 }
 
 func (ms *MockDB) getYunikornID() string {
@@ -151,7 +185,7 @@ func (mc *MockClient) GetRecentEvents(_ context.Context, start uint64) (*EventQu
 	}
 
 	if mc.failure {
-		return nil, fmt.Errorf("error while getting events")
+		return nil, errors.New("error while getting events")
 	}
 
 	var filtered []*si.EventRecord
