@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/yunikorn-core/pkg/common"
 	"github.com/apache/yunikorn-core/pkg/common/resources"
+	"github.com/apache/yunikorn-core/pkg/events/eventtest"
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
@@ -54,25 +55,25 @@ func TestSendAppDoesNotFitEvent(t *testing.T) {
 	app := &Application{
 		queuePath: "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendAppDoesNotFitEvent(&AllocationAsk{}, &resources.Resource{})
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendAppDoesNotFitEvent(&AllocationAsk{
 		applicationID: appID0,
 		allocationKey: aKey,
 	}, &resources.Resource{})
-	assert.Equal(t, 1, len(mock.events), "event was not generated")
+	assert.Equal(t, 1, len(mock.GetEvents()), "event was not generated")
 }
 
 func TestSendAppDoesNotFitEventWithRateLimiter(t *testing.T) {
 	app := &Application{
 		queuePath: "root.test",
 	}
-	mock := newEventSystemMock()
+	mock := eventtest.NewEventSystemMock(true)
 	appEvents := newApplicationEvents(app, mock)
 	startTime := time.Now()
 	for {
@@ -86,19 +87,19 @@ func TestSendAppDoesNotFitEventWithRateLimiter(t *testing.T) {
 		}, &resources.Resource{})
 		time.Sleep(10 * time.Millisecond)
 	}
-	assert.Equal(t, 1, len(mock.events), "event was not generated")
+	assert.Equal(t, 1, len(mock.GetEvents()), "event was not generated")
 }
 
 func TestSendPlaceholderLargerEvent(t *testing.T) {
 	app := &Application{
 		queuePath: "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendPlaceholderLargerEvent(&Allocation{}, &AllocationAsk{})
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendPlaceholderLargerEvent(&Allocation{
 		allocationKey: aKey,
@@ -106,7 +107,7 @@ func TestSendPlaceholderLargerEvent(t *testing.T) {
 		applicationID: appID0,
 		allocationKey: aKey,
 	})
-	assert.Equal(t, 1, len(mock.events), "event was not generated")
+	assert.Equal(t, 1, len(mock.GetEvents()), "event was not generated")
 }
 
 func TestSendNewAllocationEvent(t *testing.T) {
@@ -114,12 +115,12 @@ func TestSendNewAllocationEvent(t *testing.T) {
 		ApplicationID: appID0,
 		queuePath:     "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendNewAllocationEvent(&Allocation{})
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	assert.Assert(t, appEvents.eventSystem != nil, "event system should not be nil")
 	appEvents.sendNewAllocationEvent(&Allocation{
@@ -127,13 +128,13 @@ func TestSendNewAllocationEvent(t *testing.T) {
 		allocationKey: aKey,
 		allocationID:  aAllocationID,
 	})
-	assert.Equal(t, 1, len(mock.events), "event was not generated")
-	assert.Equal(t, si.EventRecord_APP, mock.events[0].Type, "event type is not expected")
-	assert.Equal(t, si.EventRecord_ADD, mock.events[0].EventChangeType, "event change type is not expected")
-	assert.Equal(t, si.EventRecord_APP_ALLOC, mock.events[0].EventChangeDetail, "event change detail is not expected")
-	assert.Equal(t, appID0, mock.events[0].ObjectID, "event object id is not expected")
-	assert.Equal(t, aAllocationID, mock.events[0].ReferenceID, "event reference id is not expected")
-	assert.Equal(t, common.Empty, mock.events[0].Message, "message is not expected")
+	assert.Equal(t, 1, len(mock.GetEvents()), "event was not generated")
+	assert.Equal(t, si.EventRecord_APP, mock.GetEvents()[0].Type, "event type is not expected")
+	assert.Equal(t, si.EventRecord_ADD, mock.GetEvents()[0].EventChangeType, "event change type is not expected")
+	assert.Equal(t, si.EventRecord_APP_ALLOC, mock.GetEvents()[0].EventChangeDetail, "event change detail is not expected")
+	assert.Equal(t, appID0, mock.GetEvents()[0].ObjectID, "event object id is not expected")
+	assert.Equal(t, aAllocationID, mock.GetEvents()[0].ReferenceID, "event reference id is not expected")
+	assert.Equal(t, common.Empty, mock.GetEvents()[0].Message, "message is not expected")
 }
 
 func TestSendNewAskEvent(t *testing.T) {
@@ -141,25 +142,25 @@ func TestSendNewAskEvent(t *testing.T) {
 		ApplicationID: appID0,
 		queuePath:     "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendNewAskEvent(&AllocationAsk{})
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	assert.Assert(t, appEvents.eventSystem != nil, "event system should not be nil")
 	appEvents.sendNewAskEvent(&AllocationAsk{
 		applicationID: appID0,
 		allocationKey: aKey,
 	})
-	assert.Equal(t, 1, len(mock.events), "event was not generated")
-	assert.Equal(t, si.EventRecord_APP, mock.events[0].Type, "event type is not expected")
-	assert.Equal(t, si.EventRecord_ADD, mock.events[0].EventChangeType, "event change type is not expected")
-	assert.Equal(t, si.EventRecord_APP_REQUEST, mock.events[0].EventChangeDetail, "event change detail is not expected")
-	assert.Equal(t, appID0, mock.events[0].ObjectID, "event object id is not expected")
-	assert.Equal(t, aKey, mock.events[0].ReferenceID, "event reference id is not expected")
-	assert.Equal(t, common.Empty, mock.events[0].Message, "message is not expected")
+	assert.Equal(t, 1, len(mock.GetEvents()), "event was not generated")
+	assert.Equal(t, si.EventRecord_APP, mock.GetEvents()[0].Type, "event type is not expected")
+	assert.Equal(t, si.EventRecord_ADD, mock.GetEvents()[0].EventChangeType, "event change type is not expected")
+	assert.Equal(t, si.EventRecord_APP_REQUEST, mock.GetEvents()[0].EventChangeDetail, "event change detail is not expected")
+	assert.Equal(t, appID0, mock.GetEvents()[0].ObjectID, "event object id is not expected")
+	assert.Equal(t, aKey, mock.GetEvents()[0].ReferenceID, "event reference id is not expected")
+	assert.Equal(t, common.Empty, mock.GetEvents()[0].Message, "message is not expected")
 }
 
 func TestSendRemoveAllocationEvent(t *testing.T) {
@@ -167,14 +168,14 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 		ApplicationID: appID0,
 		queuePath:     "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendRemoveAllocationEvent(&Allocation{}, si.TerminationType_STOPPED_BY_RM)
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
 	testCases := []struct {
 		name                 string
-		eventSystemMock      *EventSystemMock
+		eventSystemMock      *eventtest.EventSystemMock
 		terminationType      si.TerminationType
 		allocation           *Allocation
 		expectedEventCnt     int
@@ -186,7 +187,7 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 	}{
 		{
 			name:                 "remove allocation cause of node removal",
-			eventSystemMock:      newEventSystemMock(),
+			eventSystemMock:      eventtest.NewEventSystemMock(true),
 			terminationType:      si.TerminationType_UNKNOWN_TERMINATION_TYPE,
 			allocation:           &Allocation{applicationID: appID0, allocationKey: aKey, allocationID: aAllocationID},
 			expectedEventCnt:     1,
@@ -198,7 +199,7 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 		},
 		{
 			name:                 "remove allocation cause of resource manager cancel",
-			eventSystemMock:      newEventSystemMock(),
+			eventSystemMock:      eventtest.NewEventSystemMock(true),
 			terminationType:      si.TerminationType_STOPPED_BY_RM,
 			allocation:           &Allocation{applicationID: appID0, allocationKey: aKey, allocationID: aAllocationID},
 			expectedEventCnt:     1,
@@ -210,7 +211,7 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 		},
 		{
 			name:                 "remove allocation cause of timeout",
-			eventSystemMock:      newEventSystemMock(),
+			eventSystemMock:      eventtest.NewEventSystemMock(true),
 			terminationType:      si.TerminationType_TIMEOUT,
 			allocation:           &Allocation{applicationID: appID0, allocationKey: aKey, allocationID: aAllocationID},
 			expectedEventCnt:     1,
@@ -222,7 +223,7 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 		},
 		{
 			name:                 "remove allocation cause of preemption",
-			eventSystemMock:      newEventSystemMock(),
+			eventSystemMock:      eventtest.NewEventSystemMock(true),
 			terminationType:      si.TerminationType_PREEMPTED_BY_SCHEDULER,
 			allocation:           &Allocation{applicationID: appID0, allocationKey: aKey, allocationID: aAllocationID},
 			expectedEventCnt:     1,
@@ -234,7 +235,7 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 		},
 		{
 			name:                 "remove allocation cause of replacement",
-			eventSystemMock:      newEventSystemMock(),
+			eventSystemMock:      eventtest.NewEventSystemMock(true),
 			terminationType:      si.TerminationType_PLACEHOLDER_REPLACED,
 			allocation:           &Allocation{applicationID: appID0, allocationKey: aKey, allocationID: aAllocationID},
 			expectedEventCnt:     1,
@@ -255,13 +256,13 @@ func TestSendRemoveAllocationEvent(t *testing.T) {
 				appEvents := newApplicationEvents(app, testCase.eventSystemMock)
 				assert.Assert(t, appEvents.eventSystem != nil, "event system should not be nil")
 				appEvents.sendRemoveAllocationEvent(testCase.allocation, testCase.terminationType)
-				assert.Equal(t, testCase.expectedEventCnt, len(testCase.eventSystemMock.events), "event was not generated")
-				assert.Equal(t, testCase.expectedType, testCase.eventSystemMock.events[0].Type, "event type is not expected")
-				assert.Equal(t, testCase.expectedChangeType, testCase.eventSystemMock.events[0].EventChangeType, "event change type is not expected")
-				assert.Equal(t, testCase.expectedChangeDetail, testCase.eventSystemMock.events[0].EventChangeDetail, "event change detail is not expected")
-				assert.Equal(t, testCase.expectedObjectID, testCase.eventSystemMock.events[0].ObjectID, "event object id is not expected")
-				assert.Equal(t, testCase.expectedReferenceID, testCase.eventSystemMock.events[0].ReferenceID, "event reference id is not expected")
-				assert.Equal(t, common.Empty, testCase.eventSystemMock.events[0].Message, "message is not expected")
+				assert.Equal(t, testCase.expectedEventCnt, len(testCase.eventSystemMock.GetEvents()), "event was not generated")
+				assert.Equal(t, testCase.expectedType, testCase.eventSystemMock.GetEvents()[0].Type, "event type is not expected")
+				assert.Equal(t, testCase.expectedChangeType, testCase.eventSystemMock.GetEvents()[0].EventChangeType, "event change type is not expected")
+				assert.Equal(t, testCase.expectedChangeDetail, testCase.eventSystemMock.GetEvents()[0].EventChangeDetail, "event change detail is not expected")
+				assert.Equal(t, testCase.expectedObjectID, testCase.eventSystemMock.GetEvents()[0].ObjectID, "event object id is not expected")
+				assert.Equal(t, testCase.expectedReferenceID, testCase.eventSystemMock.GetEvents()[0].ReferenceID, "event reference id is not expected")
+				assert.Equal(t, common.Empty, testCase.eventSystemMock.GetEvents()[0].Message, "message is not expected")
 			}
 		})
 	}
@@ -272,18 +273,18 @@ func TestSendRemoveAskEvent(t *testing.T) {
 		ApplicationID: appID0,
 		queuePath:     "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendRemoveAskEvent(&AllocationAsk{}, si.EventRecord_REQUEST_CANCEL)
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
 	ask := &AllocationAsk{
 		applicationID: appID0,
 		allocationKey: aKey}
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendRemoveAskEvent(ask, si.EventRecord_REQUEST_CANCEL)
-	event := mock.events[0]
+	event := mock.GetEvents()[0]
 	assert.Equal(t, si.EventRecord_APP, event.Type)
 	assert.Equal(t, si.EventRecord_REMOVE, event.EventChangeType)
 	assert.Equal(t, si.EventRecord_REQUEST_CANCEL, event.EventChangeDetail)
@@ -293,7 +294,7 @@ func TestSendRemoveAskEvent(t *testing.T) {
 
 	mock.Reset()
 	appEvents.sendRemoveAskEvent(ask, si.EventRecord_REQUEST_TIMEOUT)
-	event = mock.events[0]
+	event = mock.GetEvents()[0]
 	assert.Equal(t, si.EventRecord_APP, event.Type)
 	assert.Equal(t, si.EventRecord_REMOVE, event.EventChangeType)
 	assert.Equal(t, si.EventRecord_REQUEST_TIMEOUT, event.EventChangeDetail)
@@ -307,15 +308,16 @@ func TestSendNewApplicationEvent(t *testing.T) {
 		ApplicationID: appID0,
 		queuePath:     "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendNewApplicationEvent()
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mockEvents := newEventSystemMock()
-	appEvents = newApplicationEvents(app, mockEvents)
+	mock = eventtest.NewEventSystemMock(true)
+	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendNewApplicationEvent()
-	event := mockEvents.events[0]
+	events := mock.GetEvents()
+	event := events[0]
 	assert.Equal(t, si.EventRecord_APP, event.Type)
 	assert.Equal(t, si.EventRecord_ADD, event.EventChangeType)
 	assert.Equal(t, si.EventRecord_DETAILS_NONE, event.EventChangeDetail)
@@ -329,15 +331,15 @@ func TestSendRemoveApplicationEvent(t *testing.T) {
 		ApplicationID: appID0,
 		queuePath:     "root.test",
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
 	appEvents.sendRemoveApplicationEvent()
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendRemoveApplicationEvent()
-	event := mock.events[0]
+	event := mock.GetEvents()[0]
 	assert.Equal(t, si.EventRecord_APP, event.Type)
 	assert.Equal(t, si.EventRecord_REMOVE, event.EventChangeType)
 	assert.Equal(t, si.EventRecord_DETAILS_NONE, event.EventChangeDetail)
@@ -352,15 +354,15 @@ func TestSendStateChangeEvent(t *testing.T) {
 		queuePath:             "root.test",
 		sendStateChangeEvents: true,
 	}
-	mock := newEventSystemMockDisabled()
+	mock := eventtest.NewEventSystemMock(false)
 	appEvents := newApplicationEvents(app, mock)
-	appEvents.sendStateChangeEvent(si.EventRecord_APP_RUNNING, "")
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	appEvents.sendStateChangeEvent(si.EventRecord_APP_RUNNING, "The application is running")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendStateChangeEvent(si.EventRecord_APP_RUNNING, "The application is running")
-	event := mock.events[0]
+	event := mock.GetEvents()[0]
 	assert.Equal(t, si.EventRecord_APP, event.Type)
 	assert.Equal(t, si.EventRecord_SET, event.EventChangeType)
 	assert.Equal(t, si.EventRecord_APP_RUNNING, event.EventChangeDetail)
@@ -368,15 +370,15 @@ func TestSendStateChangeEvent(t *testing.T) {
 	assert.Equal(t, "", event.ReferenceID)
 	assert.Equal(t, "The application is running", event.Message)
 
-	mock = newEventSystemMockDisabled()
+	mock = eventtest.NewEventSystemMock(false)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendStateChangeEvent(si.EventRecord_APP_RUNNING, "ResourceReservationTimeout")
-	assert.Equal(t, 0, len(mock.events), "unexpected event")
+	assert.Equal(t, 0, len(mock.GetEvents()), "unexpected event")
 
-	mock = newEventSystemMock()
+	mock = eventtest.NewEventSystemMock(true)
 	appEvents = newApplicationEvents(app, mock)
 	appEvents.sendStateChangeEvent(si.EventRecord_APP_REJECT, "Failed to add application to partition (placement rejected)")
-	event = mock.events[0]
+	event = mock.GetEvents()[0]
 	assert.Equal(t, si.EventRecord_APP, event.Type)
 	assert.Equal(t, si.EventRecord_SET, event.EventChangeType)
 	assert.Equal(t, si.EventRecord_APP_REJECT, event.EventChangeDetail)

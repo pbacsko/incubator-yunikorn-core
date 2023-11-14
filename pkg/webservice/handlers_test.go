@@ -22,11 +22,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +40,7 @@ import (
 	"github.com/apache/yunikorn-core/pkg/common/resources"
 	"github.com/apache/yunikorn-core/pkg/common/security"
 	"github.com/apache/yunikorn-core/pkg/events"
+	"github.com/apache/yunikorn-core/pkg/events/eventtest"
 	"github.com/apache/yunikorn-core/pkg/metrics/history"
 	"github.com/apache/yunikorn-core/pkg/scheduler"
 	"github.com/apache/yunikorn-core/pkg/scheduler/objects"
@@ -1910,7 +1911,10 @@ func TestUsersAndGroupsResourceUsage(t *testing.T) {
 
 func TestGetEvents(t *testing.T) {
 	prepareSchedulerContext(t)
-	appEvent, nodeEvent, queueEvent := addEvents(t)
+	mock := eventtest.NewEventSystemMock(true)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
+	appEvent, nodeEvent, queueEvent := addEvents(mock)
 
 	checkAllEvents(t, []*si.EventRecord{appEvent, nodeEvent, queueEvent})
 
@@ -1925,20 +1929,10 @@ func TestGetEvents(t *testing.T) {
 	checkIllegalBatchRequest(t, "start=-100", `strconv.ParseUint: parsing "-100": invalid syntax`)
 }
 
-func TestGetEventsWhenTrackingDisabled(t *testing.T) {
-	original := configs.GetConfigMap()
-	defer func() {
-		ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-		ev.Stop()
-		configs.SetConfigMap(original)
-	}()
-	configMap := map[string]string{
-		configs.CMEventTrackingEnabled: "false",
-	}
-	configs.SetConfigMap(configMap)
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+func TestGetEvents_TrackingDisabled(t *testing.T) {
+	mock := eventtest.NewEventSystemMock(false)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
 
 	req, err := http.NewRequest("GET", "/ws/v1/events/batch", strings.NewReader(""))
 	assert.NilError(t, err)
@@ -1946,9 +1940,12 @@ func TestGetEventsWhenTrackingDisabled(t *testing.T) {
 }
 
 func TestGetStream(t *testing.T) {
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+	mock := eventtest.NewEventSystemMock(true)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
+	ev := make(chan *si.EventRecord)
+	mock.SetStreamChannel(ev)
+	defer close(ev)
 
 	var req *http.Request
 	req, err := http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
@@ -1960,20 +1957,19 @@ func TestGetStream(t *testing.T) {
 	resp := httptest.NewRecorder() // MockResponseWriter does not implement http.Flusher
 
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		ev.AddEvent(&si.EventRecord{
+		ev <- &si.EventRecord{
 			TimestampNano: 111,
 			ObjectID:      "app-1",
-		})
-		ev.AddEvent(&si.EventRecord{
+		}
+		ev <- &si.EventRecord{
 			TimestampNano: 222,
 			ObjectID:      "node-1",
-		})
-		ev.AddEvent(&si.EventRecord{
+		}
+		ev <- &si.EventRecord{
 			TimestampNano: 333,
 			ObjectID:      "app-2",
-		})
-		time.Sleep(200 * time.Millisecond)
+		}
+		time.Sleep(100 * time.Millisecond)
 		cancel()
 	}()
 	getStream(resp, req)
@@ -1986,12 +1982,21 @@ func TestGetStream(t *testing.T) {
 	assertEvent(t, lines[0], 111, "app-1")
 	assertEvent(t, lines[1], 222, "node-1")
 	assertEvent(t, lines[2], 333, "app-2")
+	assert.Equal(t, 0, mock.GetActiveStreams())
 }
 
 func TestGetStream_StreamClosedByProducer(t *testing.T) {
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+	mock := eventtest.NewEventSystemMock(true)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
+	ev := make(chan *si.EventRecord)
+	var closed atomic.Bool
+	mock.SetStreamChannel(ev)
+	defer func() {
+		if !closed.Load() {
+			close(ev)
+		}
+	}()
 
 	var req *http.Request
 	req, err := http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
@@ -1999,13 +2004,12 @@ func TestGetStream_StreamClosedByProducer(t *testing.T) {
 	resp := httptest.NewRecorder() // MockResponseWriter does not implement http.Flusher
 
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		ev.AddEvent(&si.EventRecord{
+		ev <- &si.EventRecord{
 			TimestampNano: 111,
 			ObjectID:      "app-1",
-		})
-		time.Sleep(100 * time.Millisecond)
-		ev.CloseAllStreams()
+		}
+		close(ev)
+		closed.Store(true)
 	}()
 
 	getStream(resp, req)
@@ -2020,9 +2024,9 @@ func TestGetStream_StreamClosedByProducer(t *testing.T) {
 }
 
 func TestGetStream_NotFlusherImpl(t *testing.T) {
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+	mock := eventtest.NewEventSystemMock(true)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
 
 	var req *http.Request
 	req, err := http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
@@ -2033,12 +2037,15 @@ func TestGetStream_NotFlusherImpl(t *testing.T) {
 
 	assert.Assert(t, strings.Contains(string(resp.outputBytes), "Writer does not implement http.Flusher"))
 	assert.Equal(t, http.StatusInternalServerError, resp.statusCode)
+	assert.Equal(t, 0, mock.GetActiveStreams())
 }
 
 func TestGetStream_Count(t *testing.T) {
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+	mock := eventtest.NewEventSystemMock(true)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
+	ev := make(chan *si.EventRecord)
+	defer close(ev)
 
 	var req *http.Request
 	req, err := http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
@@ -2048,41 +2055,25 @@ func TestGetStream_Count(t *testing.T) {
 	req = req.Clone(cancelCtx)
 	resp := httptest.NewRecorder() // MockResponseWriter does not implement http.Flusher
 
-	// add some existing events
-	ev.AddEvent(&si.EventRecord{TimestampNano: 0})
-	ev.AddEvent(&si.EventRecord{TimestampNano: 1})
-	ev.AddEvent(&si.EventRecord{TimestampNano: 2})
-	time.Sleep(100 * time.Millisecond) // let the events propagate
-
 	// case #1: "count" not set
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
+	cancel()
 	getStream(resp, req)
-	output := make([]byte, 256)
-	n, err := resp.Body.Read(output)
-	assert.Error(t, io.EOF, err.Error())
-	assert.Equal(t, 0, n)
+	assert.Equal(t, true, mock.HasCreatedStream())
+	assert.Equal(t, uint64(0), mock.GetCountForCreateStream())
+	mock.ResetStreamCalls()
 
 	// case #2: "count" is set to "2"
 	req, err = http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
 	assert.NilError(t, err)
 	cancelCtx, cancel = context.WithCancel(context.Background())
 	req = req.Clone(cancelCtx)
-	defer cancel()
 	req.URL.RawQuery = "count=2"
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
+	defer cancel()
+	cancel()
 	getStream(resp, req)
-	output = make([]byte, 256)
-	n, err = resp.Body.Read(output)
-	assert.NilError(t, err)
-	lines := strings.Split(string(output[:n]), "\n")
-	assertEvent(t, lines[0], 1, "")
-	assertEvent(t, lines[1], 2, "")
+	assert.Equal(t, true, mock.HasCreatedStream())
+	assert.Equal(t, uint64(2), mock.GetCountForCreateStream())
+	mock.ResetStreamCalls()
 
 	// case #3: illegal value
 	req, err = http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
@@ -2091,28 +2082,15 @@ func TestGetStream_Count(t *testing.T) {
 	req = req.Clone(cancelCtx)
 	defer cancel()
 	req.URL.RawQuery = "count=xyz"
+	cancel() // to prevent against any kind of blocking
 	getStream(resp, req)
-	output = make([]byte, 256)
-	n, err = resp.Body.Read(output)
-	assert.NilError(t, err)
-	line := string(output[:n])
-	assertYunikornError(t, line, `strconv.ParseUint: parsing "xyz": invalid syntax`)
+	assert.Equal(t, false, mock.HasCreatedStream())
 }
 
 func TestGetStream_TrackingDisabled(t *testing.T) {
-	original := configs.GetConfigMap()
-	defer func() {
-		ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-		ev.Stop()
-		configs.SetConfigMap(original)
-	}()
-	configMap := map[string]string{
-		configs.CMEventTrackingEnabled: "false",
-	}
-	configs.SetConfigMap(configMap)
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+	mock := eventtest.NewEventSystemMock(false)
+	setGetEventSystemFn(mock)
+	defer resetGetEventSystem()
 
 	req, err := http.NewRequest("GET", "/ws/v1/events/stream", strings.NewReader(""))
 	assert.NilError(t, err)
@@ -2125,6 +2103,16 @@ func TestGetStream_TrackingDisabled(t *testing.T) {
 	assert.NilError(t, err)
 	line := string(output[:n])
 	assertYunikornError(t, line, "Event tracking is disabled")
+}
+
+func setGetEventSystemFn(mock *eventtest.EventSystemMock) {
+	getEventSystem = func() events.EventSystem {
+		return mock
+	}
+}
+
+func resetGetEventSystem() {
+	getEventSystem = events.GetEventSystem
 }
 
 func assertEvent(t *testing.T, output string, tsNano int64, objectID string) {
@@ -2145,15 +2133,10 @@ func assertYunikornError(t *testing.T, output, errMsg string) {
 	assert.Equal(t, errMsg, ykErr.Message)
 }
 
-func addEvents(t *testing.T) (appEvent, nodeEvent, queueEvent *si.EventRecord) {
-	t.Helper()
-	events.Init()
-	ev := events.GetEventSystem().(*events.EventSystemImpl) //nolint:errcheck
-	ev.StartServiceWithPublisher(false)
+func addEvents(mock *eventtest.EventSystemMock) (appEvent, nodeEvent, queueEvent *si.EventRecord) {
 	protoRes := resources.NewResourceFromMap(map[string]resources.Quantity{
 		"cpu": 1,
 	}).ToProto()
-
 	appEvent = &si.EventRecord{
 		Type:              si.EventRecord_APP,
 		TimestampNano:     100,
@@ -2164,7 +2147,7 @@ func addEvents(t *testing.T) (appEvent, nodeEvent, queueEvent *si.EventRecord) {
 		ReferenceID:       "alloc",
 		Resource:          protoRes,
 	}
-	ev.AddEvent(appEvent)
+	mock.AddEvent(appEvent)
 	nodeEvent = &si.EventRecord{
 		Type:              si.EventRecord_NODE,
 		TimestampNano:     101,
@@ -2175,7 +2158,7 @@ func addEvents(t *testing.T) (appEvent, nodeEvent, queueEvent *si.EventRecord) {
 		ReferenceID:       "alloc",
 		Resource:          protoRes,
 	}
-	ev.AddEvent(nodeEvent)
+	mock.AddEvent(nodeEvent)
 	queueEvent = &si.EventRecord{
 		Type:              si.EventRecord_QUEUE,
 		TimestampNano:     102,
@@ -2185,13 +2168,9 @@ func addEvents(t *testing.T) (appEvent, nodeEvent, queueEvent *si.EventRecord) {
 		ObjectID:          "root.default",
 		ReferenceID:       "app",
 	}
-	ev.AddEvent(queueEvent)
-	noEvents := 0
-	err := common.WaitFor(10*time.Millisecond, time.Second, func() bool {
-		noEvents = ev.Store.CountStoredEvents()
-		return noEvents == 3
-	})
-	assert.NilError(t, err, "wanted 3 events, got %d", noEvents)
+	mock.AddEvent(queueEvent)
+	mock.SetIDRange(0, 2)
+
 	return appEvent, nodeEvent, queueEvent
 }
 

@@ -211,15 +211,6 @@ func (ec *EventSystemImpl) Restart() {
 	ec.StartServiceWithPublisher(true)
 }
 
-// VisibleForTesting
-func (ec *EventSystemImpl) CloseAllStreams() {
-	ec.streaming.Lock()
-	defer ec.streaming.Unlock()
-	for consumer := range ec.streaming.eventStreams {
-		ec.streaming.removeEventStream(consumer)
-	}
-}
-
 func (ec *EventSystemImpl) reloadConfig() {
 	ec.updateRequestCapacity()
 

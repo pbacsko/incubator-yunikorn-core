@@ -20,48 +20,7 @@ import (
 	"github.com/google/btree"
 
 	"github.com/apache/yunikorn-core/pkg/common/resources"
-	"github.com/apache/yunikorn-core/pkg/events"
-	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
-
-type EventSystemMock struct {
-	events  []*si.EventRecord
-	enabled bool
-}
-
-func (m *EventSystemMock) CreateEventStream(_ string, _ uint64) *events.EventStream {
-	return nil
-}
-
-func (m *EventSystemMock) RemoveStream(_ *events.EventStream) {
-}
-
-func (m *EventSystemMock) AddEvent(event *si.EventRecord) {
-	m.events = append(m.events, event)
-}
-
-func (m *EventSystemMock) StartService() {}
-
-func (m *EventSystemMock) Stop() {}
-
-func (m *EventSystemMock) Reset() {
-	m.events = make([]*si.EventRecord, 0)
-}
-
-func (m *EventSystemMock) GetEventsFromID(uint64, uint64) ([]*si.EventRecord, uint64, uint64) {
-	return nil, 0, 0
-}
-
-func (m *EventSystemMock) IsEventTrackingEnabled() bool {
-	return m.enabled
-}
-
-func newEventSystemMock() *EventSystemMock {
-	return &EventSystemMock{events: make([]*si.EventRecord, 0), enabled: true}
-}
-func newEventSystemMockDisabled() *EventSystemMock {
-	return &EventSystemMock{events: make([]*si.EventRecord, 0), enabled: false}
-}
 
 func getTestResource() *resources.Resource {
 	return resources.NewResourceFromMap(map[string]resources.Quantity{"cpu": 1})

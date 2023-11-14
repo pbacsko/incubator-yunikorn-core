@@ -81,6 +81,9 @@ func init() {
 	allowedActiveStatusMsg = fmt.Sprintf("Only following active statuses are allowed: %s", strings.Join(activeStatuses, ","))
 }
 
+// to simplify testing
+var getEventSystem = events.GetEventSystem
+
 func getStackInfo(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	var stack = func() []byte {
@@ -1042,7 +1045,7 @@ func getGroupResourceUsage(w http.ResponseWriter, r *http.Request) {
 
 func getEvents(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
-	eventSystem := events.GetEventSystem()
+	eventSystem := getEventSystem()
 	if !eventSystem.IsEventTrackingEnabled() {
 		buildJSONErrorResponse(w, "Event tracking is disabled", http.StatusInternalServerError)
 		return
@@ -1087,7 +1090,7 @@ func getEvents(w http.ResponseWriter, r *http.Request) {
 
 func getStream(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
-	eventSystem := events.GetEventSystem()
+	eventSystem := getEventSystem()
 	if !eventSystem.IsEventTrackingEnabled() {
 		buildJSONErrorResponse(w, "Event tracking is disabled", http.StatusInternalServerError)
 		return
