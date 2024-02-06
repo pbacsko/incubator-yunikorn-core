@@ -25,6 +25,8 @@ import (
 
 	"github.com/apache/yunikorn-core/pkg/common/resources"
 	"github.com/apache/yunikorn-core/pkg/common/security"
+	"github.com/apache/yunikorn-core/pkg/events/mock"
+	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
 const (
@@ -53,7 +55,7 @@ func TestIncreaseTrackedResource(t *testing.T) {
 	// Initialize ugm
 	GetUserManager()
 	user := security.UserGroup{User: "test", Groups: []string{"test"}}
-	userTracker := newUserTracker(user.User)
+	userTracker := newUserTracker(user.User, newUGMEvents(mock.NewEventSystemDisabled()))
 	usage1, err := resources.NewResourceFromConf(map[string]string{"mem": "10M", "vcore": "10"})
 	if err != nil {
 		t.Errorf("new resource create returned error or wrong resource: error %t, res %v", err, usage1)
@@ -113,7 +115,7 @@ func TestDecreaseTrackedResource(t *testing.T) {
 	// Initialize ugm
 	GetUserManager()
 	user := security.UserGroup{User: "test", Groups: []string{"test"}}
-	userTracker := newUserTracker(user.User)
+	userTracker := newUserTracker(user.User, newUGMEvents(mock.NewEventSystemDisabled()))
 
 	usage1, err := resources.NewResourceFromConf(map[string]string{"mem": "70M", "vcore": "70"})
 	if err != nil {
@@ -196,7 +198,7 @@ func TestSetMaxLimits(t *testing.T) {
 	// Initialize ugm
 	GetUserManager()
 	user := security.UserGroup{User: "test", Groups: []string{"test"}}
-	userTracker := newUserTracker(user.User)
+	userTracker := newUserTracker(user.User, newUGMEvents(mock.NewEventSystemDisabled()))
 	usage1, err := resources.NewResourceFromConf(map[string]string{"mem": "10M", "vcore": "10"})
 	if err != nil {
 		t.Errorf("new resource create returned error or wrong resource: error %t, res %v", err, usage1)
@@ -220,6 +222,31 @@ func TestSetMaxLimits(t *testing.T) {
 	}
 	userTracker.setLimits(hierarchy1, usage1, 1, false, false)
 	userTracker.setLimits(hierarchy5, usage1, 1, false, false)
+}
+
+func TestLinkingEvents(t *testing.T) {
+	GetUserManager()
+	user := security.UserGroup{User: "test", Groups: []string{"test"}}
+	eventSystem := mock.NewEventSystem()
+	userTracker := newUserTracker(user.User, newUGMEvents(eventSystem))
+	usage := resources.NewResourceFromMap(map[string]resources.Quantity{"cpu": 1})
+
+	groupTracker := newGroupTracker(user.User)
+	userTracker.setGroupForApp(TestApp1, groupTracker)
+	userTracker.increaseTrackedResource(hierarchy1, TestApp1, usage)
+	assert.Equal(t, 1, len(eventSystem.Events))
+	assert.Equal(t, si.EventRecord_UG_APP_LINK, eventSystem.Events[0].EventChangeDetail)
+
+	// not removing app
+	eventSystem.Reset()
+	userTracker.decreaseTrackedResource(hierarchy1, TestApp1, usage, false)
+	assert.Equal(t, 0, len(eventSystem.Events))
+
+	// removing app
+	eventSystem.Reset()
+	userTracker.decreaseTrackedResource(hierarchy1, TestApp1, usage, true)
+	assert.Equal(t, 1, len(eventSystem.Events))
+	assert.Equal(t, si.EventRecord_UG_APP_UNLINK, eventSystem.Events[0].EventChangeDetail)
 }
 
 func getUserResource(ut *UserTracker) map[string]*resources.Resource {

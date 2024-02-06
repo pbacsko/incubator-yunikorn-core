@@ -21,6 +21,7 @@ package events
 import (
 	"time"
 
+	"github.com/apache/yunikorn-core/pkg/common"
 	"github.com/apache/yunikorn-core/pkg/common/resources"
 	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
@@ -53,4 +54,8 @@ func CreateNodeEventRecord(objectID, message, referenceID string, changeType si.
 
 func CreateQueueEventRecord(objectID, message, referenceID string, changeType si.EventRecord_ChangeType, changeDetail si.EventRecord_ChangeDetail, resource *resources.Resource) *si.EventRecord {
 	return createEventRecord(si.EventRecord_QUEUE, objectID, referenceID, message, changeType, changeDetail, resource)
+}
+
+func CreateUserGroupEventRecord(objectID, referenceID, message string, changeType si.EventRecord_ChangeType, changeDetail si.EventRecord_ChangeDetail, resource *resources.Resource) *si.EventRecord {
+	return createEventRecord(si.EventRecord_USERGROUP, objectID, common.Empty, message, changeType, changeDetail, resource)
 }

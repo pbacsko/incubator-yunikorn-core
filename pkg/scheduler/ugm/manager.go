@@ -29,6 +29,7 @@ import (
 	"github.com/apache/yunikorn-core/pkg/common/configs"
 	"github.com/apache/yunikorn-core/pkg/common/resources"
 	"github.com/apache/yunikorn-core/pkg/common/security"
+	"github.com/apache/yunikorn-core/pkg/events"
 	"github.com/apache/yunikorn-core/pkg/log"
 )
 
@@ -45,6 +46,7 @@ type Manager struct {
 	configuredGroups          map[string][]string                // Hold groups for all configured queue paths.
 	userLimits                map[string]map[string]*LimitConfig // Holds queue path * user limit config
 	groupLimits               map[string]map[string]*LimitConfig // Holds queue path * group limit config
+	events                    *ugmEvents
 	sync.RWMutex
 }
 
@@ -54,6 +56,7 @@ func newManager() *Manager {
 		groupTrackers:             make(map[string]*GroupTracker),
 		userWildCardLimitsConfig:  make(map[string]*LimitConfig),
 		groupWildCardLimitsConfig: make(map[string]*LimitConfig),
+		events:                    newUGMEvents(events.GetEventSystem()),
 	}
 	return manager
 }
@@ -93,6 +96,12 @@ func (m *Manager) IncreaseTrackedResource(queuePath, applicationID string, usage
 	if !userTracker.hasGroupForApp(applicationID) {
 		m.ensureGroupTrackerForApp(queuePath, applicationID, user)
 	}
+
+	m.events.sendIncResourceUsageForUser(user.User, queuePath, usage)
+	appGroup := userTracker.getGroupForApp(applicationID)
+	if appGroup != common.Empty {
+		m.events.sendIncResourceUsageForGroup(appGroup, queuePath, usage)
+	}
 	return userTracker.increaseTrackedResource(strings.Split(queuePath, configs.DOT), applicationID, usage)
 }
 
@@ -119,8 +128,14 @@ func (m *Manager) DecreaseTrackedResource(queuePath, applicationID string, usage
 			zap.String("user", user.User))
 		return false
 	}
-	// get the group now as the decrease might remove the app from the user if removeApp is true
+
+	m.events.sendDecResourceUsageForUser(user.User, queuePath, usage)
 	appGroup := userTracker.getGroupForApp(applicationID)
+	if appGroup != common.Empty {
+		m.events.sendDecResourceUsageForGroup(appGroup, queuePath, usage)
+	}
+
+	// get the group now as the decrease might remove the app from the user if removeApp is true
 	log.Log(log.SchedUGM).Debug("Decreasing resource usage for user",
 		zap.String("user", user.User),
 		zap.String("queue path", queuePath),
@@ -235,6 +250,7 @@ func (m *Manager) ensureGroupTrackerForApp(queuePath, applicationID string, user
 		zap.String("queue path", queuePath))
 	// set this even if groupTracker is nil, as that was the final result of the resolution
 	// a nil group tracker means we do not track
+
 	userTracker.setGroupForApp(applicationID, groupTracker)
 }
 
@@ -484,6 +500,7 @@ func (m *Manager) resetUserEarlierUsage(ut *UserTracker, hierarchy []string) {
 			zap.String("user", ut.userName),
 			zap.Strings("queue path", hierarchy))
 		ut.setLimits(hierarchy, nil, 0, false, false)
+		m.events.sendLimitSetForUser(ut.userName, strings.Join(hierarchy, "."))
 		// Is there any running applications in end queue of this queue path? If not, then remove the linkage between end queue and its immediate parent
 		if ut.IsUnlinkRequired(hierarchy) {
 			ut.UnlinkQT(hierarchy)
@@ -537,6 +554,7 @@ func (m *Manager) resetGroupEarlierUsage(gt *GroupTracker, hierarchy []string) {
 			delete(ut.appGroupTrackers, app)
 		}
 		gt.setLimits(hierarchy, nil, 0)
+		m.events.sendLimitSetForGroup(gt.groupName, strings.Join(hierarchy, "."))
 		// Is there any running applications in end queue of this queue path? If not, then remove the linkage between end queue and its immediate parent
 		if gt.IsUnlinkRequired(hierarchy) {
 			gt.UnlinkQT(hierarchy)
@@ -574,7 +592,7 @@ func (m *Manager) setUserLimits(user string, limitConfig *LimitConfig, hierarchy
 		log.Log(log.SchedUGM).Debug("User tracker does not exist. Creating user tracker object to set the limit configuration",
 			zap.String("user", user),
 			zap.Strings("queue path", hierarchy))
-		userTracker = newUserTracker(user)
+		userTracker = newUserTracker(user, m.events)
 		m.userTrackers[user] = userTracker
 	}
 	userTracker.setLimits(hierarchy, limitConfig.maxResources, limitConfig.maxApplications, false, false)
@@ -612,7 +630,7 @@ func (m *Manager) getUserTracker(user string) *UserTracker {
 	}
 	log.Log(log.SchedUGM).Info("User tracker doesn't exists. Creating user tracker.",
 		zap.String("user", user))
-	userTracker := newUserTracker(user)
+	userTracker := newUserTracker(user, m.events)
 	m.userTrackers[user] = userTracker
 	return userTracker
 }

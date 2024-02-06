@@ -22,7 +22,7 @@ module github.com/apache/yunikorn-core
 go 1.21
 
 require (
-	github.com/apache/yunikorn-scheduler-interface v0.0.0-20231211235204-ec7bfad7d00e
+	github.com/apache/yunikorn-scheduler-interface v0.0.0-20240207104510-999a36153fa9
 	github.com/google/btree v1.1.2
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
@@ -61,6 +61,7 @@ require (
 )
 
 replace (
+	github.com/apache/yunikorn-scheduler-interface => ../yunikorn-scheduler-interface/
 	golang.org/x/crypto => golang.org/x/crypto v0.18.0
 	golang.org/x/lint => golang.org/x/lint v0.0.0-20210508222113-6edffad5e616
 	golang.org/x/net => golang.org/x/net v0.20.0

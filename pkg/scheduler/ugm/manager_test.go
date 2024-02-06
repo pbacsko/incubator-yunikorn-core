@@ -29,6 +29,8 @@ import (
 	"github.com/apache/yunikorn-core/pkg/common/configs"
 	"github.com/apache/yunikorn-core/pkg/common/resources"
 	"github.com/apache/yunikorn-core/pkg/common/security"
+	"github.com/apache/yunikorn-core/pkg/events/mock"
+	"github.com/apache/yunikorn-scheduler-interface/lib/go/si"
 )
 
 const (
@@ -1631,6 +1633,63 @@ func TestMultipleGroupLimitChange(t *testing.T) {
 	// user3 can't increase usage more than wildcard limit
 	headroom = manager.Headroom(queuePathParent, "test-app-3-2", user3)
 	assert.Equal(t, headroom.FitInMaxUndef(usage), false)
+}
+
+func TestResourceTracking(t *testing.T) {
+	setupUGM()
+
+	manager := GetUserManager()
+	conf := createConfigWithLimits([]configs.Limit{
+		createLimit(nil, []string{"group1", "group2"}, largeResource, 2),
+		createLimit(nil, []string{"*"}, mediumResource, 1),
+	})
+	assert.NilError(t, manager.UpdateConfig(conf.Queues[0], "root"))
+	eventSystem := mock.NewEventSystem()
+	manager.events = newUGMEvents(eventSystem)
+	usage := resources.NewResourceFromMap(map[string]resources.Quantity{"cpu": 1})
+	user1 := security.UserGroup{User: "user1", Groups: []string{"group1"}}
+
+	manager.IncreaseTrackedResource(queuePathParent, "app-1", usage, user1)
+	assert.Equal(t, 3, len(eventSystem.Events))
+	event1 := eventSystem.Events[1]
+	assert.Equal(t, si.EventRecord_UG_USER_RESOURCE, event1.EventChangeDetail)
+	assert.Equal(t, si.EventRecord_ADD, event1.EventChangeType)
+	assert.Assert(t, event1.Resource != nil)
+	assert.Equal(t, 1, len(event1.Resource.Resources))
+	assert.Equal(t, int64(1), event1.Resource.Resources["cpu"].Value)
+	event2 := eventSystem.Events[2]
+	assert.Equal(t, si.EventRecord_UG_GROUP_RESOURCE, event2.EventChangeDetail)
+	assert.Equal(t, si.EventRecord_ADD, event2.EventChangeType)
+	assert.Assert(t, event2.Resource != nil)
+	assert.Equal(t, 1, len(event2.Resource.Resources))
+	assert.Equal(t, int64(1), event2.Resource.Resources["cpu"].Value)
+
+	eventSystem.Reset()
+	manager.DecreaseTrackedResource(queuePathParent, "app-1", usage, user1, false)
+	assert.Equal(t, 2, len(eventSystem.Events))
+	event0 := eventSystem.Events[0]
+	assert.Equal(t, si.EventRecord_UG_USER_RESOURCE, event0.EventChangeDetail)
+	assert.Assert(t, event0.Resource != nil)
+	assert.Equal(t, 1, len(event0.Resource.Resources))
+	assert.Equal(t, int64(1), event0.Resource.Resources["cpu"].Value)
+	assert.Equal(t, si.EventRecord_REMOVE, event0.EventChangeType)
+	event1 = eventSystem.Events[1]
+	assert.Equal(t, si.EventRecord_UG_GROUP_RESOURCE, event1.EventChangeDetail)
+	assert.Assert(t, event1.Resource != nil)
+	assert.Equal(t, 1, len(event1.Resource.Resources))
+	assert.Equal(t, int64(1), event1.Resource.Resources["cpu"].Value)
+	assert.Equal(t, si.EventRecord_REMOVE, event1.EventChangeType)
+
+	// no group
+	eventSystem.Reset()
+	manager.IncreaseTrackedResource("root.default", "app-2", usage, user1)
+	assert.Equal(t, 1, len(eventSystem.Events))
+	assert.Equal(t, si.EventRecord_UG_USER_RESOURCE, eventSystem.Events[0].EventChangeDetail)
+
+	eventSystem.Reset()
+	manager.DecreaseTrackedResource("root.default", "app-2", usage, user1, false)
+	assert.Equal(t, 1, len(eventSystem.Events))
+	assert.Equal(t, si.EventRecord_UG_USER_RESOURCE, eventSystem.Events[0].EventChangeDetail)
 }
 
 func createLimit(users, groups []string, maxResources map[string]string, maxApps uint64) configs.Limit {

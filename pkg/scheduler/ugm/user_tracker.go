@@ -38,16 +38,18 @@ type UserTracker struct {
 	// and group tracker object as value.
 	appGroupTrackers map[string]*GroupTracker
 	queueTracker     *QueueTracker // Holds the actual resource usage of queue path where application runs
+	events           *ugmEvents
 
 	sync.RWMutex
 }
 
-func newUserTracker(userName string) *UserTracker {
+func newUserTracker(userName string, ugmEvents *ugmEvents) *UserTracker {
 	queueTracker := newRootQueueTracker(user)
 	userTracker := &UserTracker{
 		userName:         userName,
 		appGroupTrackers: make(map[string]*GroupTracker),
 		queueTracker:     queueTracker,
+		events:           ugmEvents,
 	}
 	return userTracker
 }
@@ -82,6 +84,11 @@ func (ut *UserTracker) decreaseTrackedResource(hierarchy []string, applicationID
 	ut.Lock()
 	defer ut.Unlock()
 	if removeApp {
+		tracker := ut.appGroupTrackers[applicationID]
+		if tracker != nil {
+			appGroup := tracker.groupName
+			ut.events.sendAppGroupUnlinked(appGroup, applicationID)
+		}
 		delete(ut.appGroupTrackers, applicationID)
 	}
 	return ut.queueTracker.decreaseTrackedResource(hierarchy, applicationID, usage, removeApp)
@@ -97,6 +104,9 @@ func (ut *UserTracker) hasGroupForApp(applicationID string) bool {
 func (ut *UserTracker) setGroupForApp(applicationID string, groupTrack *GroupTracker) {
 	ut.Lock()
 	defer ut.Unlock()
+	if groupTrack != nil {
+		ut.events.sendAppGroupLinked(applicationID, groupTrack.groupName)
+	}
 	ut.appGroupTrackers[applicationID] = groupTrack
 }
 
