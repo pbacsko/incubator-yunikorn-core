@@ -2672,6 +2672,30 @@ func TestUpdateRunnableStatus(t *testing.T) {
 	assert.Equal(t, si.EventRecord_APP_CANNOTRUN_QUOTA, eventSystem.Events[1].EventChangeDetail)
 }
 
+func TestGetMaxResourceFromTag(t *testing.T) {
+	app := newApplication(appID0, "default", "root.unknown")
+	testGetResourceFromTag(t, siCommon.AppTagNamespaceResourceQuota, app.tags, app.GetMaxResource)
+}
+
+func TestGuaranteedResourceFromTag(t *testing.T) {
+	app := newApplication(appID0, "default", "root.unknown")
+	testGetResourceFromTag(t, siCommon.AppTagNamespaceResourceGuaranteed, app.tags, app.GetGuaranteedResource)
+}
+
+func testGetResourceFromTag(t *testing.T, tagName string, tags map[string]string, getRes func() *resources.Resource) {
+	assert.Equal(t, 0, len(tags), "tags are not empty")
+
+	// no value for tag
+	res := getRes()
+	assert.Assert(t, res == nil, "unexpected resource")
+
+	// valid value
+
+	// zero
+
+	// invalid value
+}
+
 func (sa *Application) addPlaceholderDataWithLocking(ask *AllocationAsk) {
 	sa.Lock()
 	defer sa.Unlock()
