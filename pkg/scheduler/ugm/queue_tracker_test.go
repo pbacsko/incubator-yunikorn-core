@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/yunikorn-core/pkg/common/configs"
 	"github.com/apache/yunikorn-core/pkg/common/resources"
+	"github.com/apache/yunikorn-core/pkg/webservice/dao"
 )
 
 func TestQTIncreaseTrackedResource(t *testing.T) {
@@ -316,6 +317,104 @@ func TestNewQueueTracker(t *testing.T) {
 	assert.Assert(t, !parent.useWildCard)
 	assert.Assert(t, resources.IsZero(parent.maxResources))
 	assert.Assert(t, resources.IsZero(parent.resourceUsage))
+}
+
+func TestCanBeRemoved(t *testing.T) {
+	GetUserManager()
+	root := newRootQueueTracker(user)
+	usage1, err := resources.NewResourceFromConf(map[string]string{"mem": "10M", "vcore": "10"})
+	assert.NilError(t, err)
+
+	// create tracker hierarchy
+	root.increaseTrackedResource(strings.Split(queuePath1, configs.DOT), TestApp1, user, usage1)
+	parentQ := root.childQueueTrackers["parent"]
+	childQ := parentQ.childQueueTrackers["child1"]
+	assert.Assert(t, !root.canBeRemoved())
+	assert.Assert(t, !parentQ.canBeRemoved())
+	assert.Assert(t, !childQ.canBeRemoved())
+
+	// remove app from "child1"
+	childQ.runningApplications = make(map[string]bool)
+	childQ.resourceUsage = resources.NewResource()
+	assert.Assert(t, root.canBeRemoved())
+	assert.Assert(t, parentQ.canBeRemoved())
+	assert.Assert(t, childQ.canBeRemoved())
+}
+
+func TestGetResourceUsageDAOInfo(t *testing.T) {
+	GetUserManager()
+	root := newRootQueueTracker(user)
+	usage1, err := resources.NewResourceFromConf(map[string]string{"mem": "10M", "vcore": "10"})
+	assert.NilError(t, err)
+
+	// create tracker hierarchy
+	root.increaseTrackedResource(strings.Split(queuePath1, configs.DOT), TestApp1, user, usage1)
+
+	// update settings on "parent" and "child1" directly
+	parentQ := root.childQueueTrackers["parent"]
+	childQ := parentQ.childQueueTrackers["child1"]
+	childQ.maxRunningApps = 2
+	maxRes := resources.NewResourceFromMap(map[string]resources.Quantity{
+		"first": 123,
+	})
+	childQ.maxResources = maxRes.Clone()
+	parentQ.maxRunningApps = 3
+
+	rootDao := root.getResourceUsageDAOInfo("")
+	assert.Assert(t, resources.Equals(usage1, rootDao.ResourceUsage))
+	assert.Equal(t, "root", rootDao.QueuePath)
+	assert.Equal(t, 1, len(rootDao.RunningApplications))
+	assert.Equal(t, TestApp1, rootDao.RunningApplications[0])
+	assert.Equal(t, 1, len(rootDao.Children))
+	assert.Equal(t, uint64(0), rootDao.MaxApplications)
+	assert.Assert(t, rootDao.MaxResources == nil)
+	parentDao := rootDao.Children[0]
+	assert.Assert(t, resources.Equals(usage1, parentDao.ResourceUsage))
+	assert.Equal(t, "root.parent", parentDao.QueuePath)
+	assert.Equal(t, 1, len(parentDao.RunningApplications))
+	assert.Equal(t, TestApp1, parentDao.RunningApplications[0])
+	assert.Equal(t, uint64(3), parentDao.MaxApplications)
+	assert.Assert(t, parentDao.MaxResources == nil)
+	assert.Equal(t, 1, len(parentDao.Children))
+	childDao := parentDao.Children[0]
+	assert.Assert(t, resources.Equals(usage1, childDao.ResourceUsage))
+	assert.Equal(t, "root.parent.child1", childDao.QueuePath)
+	assert.Equal(t, 1, len(childDao.RunningApplications))
+	assert.Equal(t, TestApp1, childDao.RunningApplications[0])
+	assert.Equal(t, uint64(2), childDao.MaxApplications)
+	assert.Assert(t, resources.Equals(maxRes, childDao.MaxResources))
+	assert.Equal(t, 0, len(childDao.Children))
+
+	root = nil
+	rootDao = root.getResourceUsageDAOInfo("")
+	assert.DeepEqual(t, rootDao, &dao.ResourceUsageDAOInfo{})
+}
+
+func TestSetLimit(t *testing.T) {
+	GetUserManager()
+	root := newRootQueueTracker(user)
+	limit, err := resources.NewResourceFromConf(map[string]string{"mem": "10M", "vcore": "10"})
+	assert.NilError(t, err)
+
+	// create tracker hierarchy
+	root.setLimit(strings.Split(queuePath1, configs.DOT), limit.Clone(), 3, true, user, true)
+
+	// check settings
+	parentQ := root.childQueueTrackers["parent"]
+	assert.Assert(t, parentQ.maxResources == nil)
+	assert.Equal(t, uint64(0), parentQ.maxRunningApps)
+	childQ := parentQ.childQueueTrackers["child1"]
+	assert.Assert(t, parentQ.maxResources == nil)
+	assert.Equal(t, uint64(0), parentQ.maxRunningApps)
+	assert.Assert(t, resources.Equals(limit, childQ.maxResources))
+
+	// check if settings are overridden
+	newLimit, err := resources.NewResourceFromConf(map[string]string{"mem": "20M", "vcore": "20"})
+	assert.NilError(t, err)
+	root.setLimit(strings.Split(queuePath1, configs.DOT), newLimit.Clone(), 3, false, user, true)
+	assert.Assert(t, resources.Equals(limit, childQ.maxResources))
+	root.setLimit(strings.Split(queuePath1, configs.DOT), newLimit.Clone(), 3, true, user, true)
+	assert.Assert(t, resources.Equals(newLimit, childQ.maxResources))
 }
 
 func getQTResource(qt *QueueTracker) map[string]*resources.Resource {
