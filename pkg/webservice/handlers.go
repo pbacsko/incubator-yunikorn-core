@@ -103,7 +103,21 @@ func init() {
 	maxRESTResponseSize.Store(configs.DefaultRESTResponseSize)
 }
 
-func getStackInfo(w http.ResponseWriter, r *http.Request) {
+type RESTHandler struct {
+	imHistory        *history.InternalMetricsHistory
+	schedulerContext *scheduler.ClusterContext
+	streamingLimiter *StreamingLimiter
+}
+
+func NewRESTHandler(imHistory *history.InternalMetricsHistory, schedulerContext *scheduler.ClusterContext) *RESTHandler {
+	return &RESTHandler{
+		imHistory:        imHistory,
+		schedulerContext: schedulerContext,
+		streamingLimiter: NewStreamingLimiter(),
+	}
+}
+
+func (*RESTHandler) getStackInfo(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
 	var stack = func() []byte {
 		buf := make([]byte, 1024)
@@ -121,7 +135,7 @@ func getStackInfo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getClusterInfo(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getClusterInfo(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 
 	lists := schedulerContext.GetPartitionMapClone()
@@ -143,7 +157,7 @@ func validateQueue(queuePath string) error {
 	return nil
 }
 
-func validateConf(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) validateConf(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	requestBytes, err := io.ReadAll(r.Body)
 	if err == nil {
@@ -393,9 +407,9 @@ func getNodesDAO(entries []*objects.Node) []*dao.NodeDAOInfo {
 // type on the root queue based on the registered resources.
 // Only check the default partition
 // Deprecated - To be removed in next major release. Replaced with getNodesUtilisations
-func getNodeUtilisation(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getNodeUtilisation(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(configs.DefaultPartition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(configs.DefaultPartition)
 	if partitionContext == nil {
 		buildJSONErrorResponse(w, PartitionDoesNotExists, http.StatusInternalServerError)
 		return
@@ -457,10 +471,10 @@ func getNodesUtilJSON(partition *scheduler.PartitionContext, name string) *dao.N
 	}
 }
 
-func getNodeUtilisations(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getNodeUtilisations(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	var result []*dao.PartitionNodesUtilDAOInfo
-	for _, part := range schedulerContext.GetPartitionMapClone() {
+	for _, part := range rh.schedulerContext.GetPartitionMapClone() {
 		result = append(result, getPartitionNodesUtilJSON(part))
 	}
 
@@ -530,28 +544,28 @@ func getPartitionNodesUtilJSON(partition *scheduler.PartitionContext) *dao.Parti
 	}
 }
 
-func getApplicationHistory(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getApplicationHistory(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
 
 	// There is nothing to return but we did not really encounter a problem
-	if imHistory == nil {
+	if rh.imHistory == nil {
 		buildJSONErrorResponse(w, "Internal metrics collection is not enabled.", http.StatusInternalServerError)
 		return
 	}
 	// get a copy of the records: if the array contains nil values they will always be at the
 	// start and we cannot shortcut the loop using a break, we must finish iterating
-	records := imHistory.GetRecords()
+	records := rh.imHistory.GetRecords()
 	result := getAppHistoryDAO(records)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		buildJSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func getContainerHistory(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getContainerHistory(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
 
 	// There is nothing to return but we did not really encounter a problem
-	if imHistory == nil {
+	if rh.imHistory == nil {
 		buildJSONErrorResponse(w, "Internal metrics collection is not enabled.", http.StatusInternalServerError)
 		return
 	}
@@ -564,7 +578,7 @@ func getContainerHistory(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getClusterConfig(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getClusterConfig(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 
 	var marshalledConf []byte
@@ -600,11 +614,11 @@ func getClusterConfigDAO() *dao.ConfigDAOInfo {
 	return &conf
 }
 
-func checkHealthStatus(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) checkHealthStatus(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
 
 	// Fetch last healthCheck result
-	result := schedulerContext.GetLastHealthCheckResult()
+	result := rh.schedulerContext.GetLastHealthCheckResult()
 	if result != nil {
 		if !result.Healthy {
 			log.Log(log.SchedHealth).Error("Scheduler is not healthy", zap.Any("health check info", *result))
@@ -623,17 +637,17 @@ func checkHealthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPartitions(w http.ResponseWriter, _ *http.Request) {
+func (rh *RESTHandler) getPartitions(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
 
-	lists := schedulerContext.GetPartitionMapClone()
+	lists := rh.schedulerContext.GetPartitionMapClone()
 	partitionsInfo := getPartitionInfoDAO(lists)
 	if err := json.NewEncoder(w).Encode(partitionsInfo); err != nil {
 		buildJSONErrorResponse(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func getPartitionQueues(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getPartitionQueues(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -642,7 +656,7 @@ func getPartitionQueues(w http.ResponseWriter, r *http.Request) {
 	}
 	partitionName := vars.ByName("partition")
 	var partitionQueuesDAOInfo dao.PartitionQueueDAOInfo
-	var partition = schedulerContext.GetPartitionWithoutClusterID(partitionName)
+	var partition = rh.schedulerContext.GetPartitionWithoutClusterID(partitionName)
 	if partition != nil {
 		partitionQueuesDAOInfo = partition.GetPartitionQueues()
 	} else {
@@ -654,7 +668,7 @@ func getPartitionQueues(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPartitionQueue(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getPartitionQueue(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -662,7 +676,7 @@ func getPartitionQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	partition := vars.ByName("partition")
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext == nil {
 		buildJSONErrorResponse(w, PartitionDoesNotExists, http.StatusNotFound)
 		return
@@ -684,7 +698,7 @@ func getPartitionQueue(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPartitionNodes(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getPartitionNodes(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -692,7 +706,7 @@ func getPartitionNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	partition := vars.ByName("partition")
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext != nil {
 		nodesDao := getNodesDAO(partitionContext.GetNodes())
 		if err := json.NewEncoder(w).Encode(nodesDao); err != nil {
@@ -703,7 +717,7 @@ func getPartitionNodes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPartitionNode(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getPartitionNode(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -711,7 +725,7 @@ func getPartitionNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	partition := vars.ByName("partition")
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext != nil {
 		nodeID := vars.ByName("node")
 		node := partitionContext.GetNode(nodeID)
@@ -728,7 +742,7 @@ func getPartitionNode(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getQueueApplications(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getQueueApplications(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -742,7 +756,7 @@ func getQueueApplications(w http.ResponseWriter, r *http.Request) {
 		buildJSONErrorResponse(w, queueErr.Error(), http.StatusBadRequest)
 		return
 	}
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext == nil {
 		buildJSONErrorResponse(w, PartitionDoesNotExists, http.StatusNotFound)
 		return
@@ -763,7 +777,7 @@ func getQueueApplications(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPartitionApplicationsByState(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getPartitionApplicationsByState(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -773,7 +787,7 @@ func getPartitionApplicationsByState(w http.ResponseWriter, r *http.Request) {
 	partition := vars.ByName("partition")
 	appState := strings.ToLower(vars.ByName("state"))
 
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext == nil {
 		buildJSONErrorResponse(w, PartitionDoesNotExists, http.StatusNotFound)
 		return
@@ -811,7 +825,7 @@ func getPartitionApplicationsByState(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getApplication(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getApplication(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -821,7 +835,7 @@ func getApplication(w http.ResponseWriter, r *http.Request) {
 	partition := vars.ByName("partition")
 	queueName := vars.ByName("queue")
 	application := vars.ByName("application")
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext == nil {
 		buildJSONErrorResponse(w, PartitionDoesNotExists, http.StatusNotFound)
 		return
@@ -852,7 +866,7 @@ func getApplication(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPartitionRules(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getPartitionRules(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -860,7 +874,7 @@ func getPartitionRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	partition := vars.ByName("partition")
-	partitionContext := schedulerContext.GetPartitionWithoutClusterID(partition)
+	partitionContext := rh.schedulerContext.GetPartitionWithoutClusterID(partition)
 	if partitionContext == nil {
 		buildJSONErrorResponse(w, PartitionDoesNotExists, http.StatusNotFound)
 		return
@@ -1048,12 +1062,12 @@ func getResourceManagerDiagnostics() map[string]interface{} {
 	return result
 }
 
-func getMetrics(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics2.GetRuntimeMetrics().Collect()
 	promhttp.Handler().ServeHTTP(w, r)
 }
 
-func getUsersResourceUsage(w http.ResponseWriter, _ *http.Request) {
+func (*RESTHandler) getUsersResourceUsage(w http.ResponseWriter, _ *http.Request) {
 	writeHeaders(w)
 	userManager := ugm.GetUserManager()
 	usersResources := userManager.GetUsersResources()
@@ -1066,7 +1080,7 @@ func getUsersResourceUsage(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func getUserResourceUsage(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getUserResourceUsage(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -1089,7 +1103,7 @@ func getUserResourceUsage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getGroupsResourceUsage(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getGroupsResourceUsage(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	userManager := ugm.GetUserManager()
 	groupsResources := userManager.GetGroupsResources()
@@ -1102,7 +1116,7 @@ func getGroupsResourceUsage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getGroupResourceUsage(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getGroupResourceUsage(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	vars := httprouter.ParamsFromContext(r.Context())
 	if vars == nil {
@@ -1125,7 +1139,7 @@ func getGroupResourceUsage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getEvents(w http.ResponseWriter, r *http.Request) {
+func (*RESTHandler) getEvents(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	eventSystem := events.GetEventSystem()
 	if !eventSystem.IsEventTrackingEnabled() {
@@ -1173,7 +1187,7 @@ func getEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getStream(w http.ResponseWriter, r *http.Request) {
+func (rh *RESTHandler) getStream(w http.ResponseWriter, r *http.Request) {
 	writeHeaders(w)
 	eventSystem := events.GetEventSystem()
 	if !eventSystem.IsEventTrackingEnabled() {
@@ -1187,11 +1201,11 @@ func getStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !streamingLimiter.AddHost(r.Host) {
+	if !rh.streamingLimiter.AddHost(r.Host) {
 		buildJSONErrorResponse(w, "Too many streaming connections", http.StatusServiceUnavailable)
 		return
 	}
-	defer streamingLimiter.RemoveHost(r.Host)
+	defer rh.streamingLimiter.RemoveHost(r.Host)
 
 	var count uint64
 	if countStr := r.URL.Query().Get("count"); countStr != "" {

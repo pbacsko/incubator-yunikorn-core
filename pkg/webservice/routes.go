@@ -32,250 +32,252 @@ type route struct {
 
 type routes []route
 
-var webRoutes = routes{
-	// endpoints to retrieve general cluster info
-	route{
-		"Cluster",
-		"GET",
-		"/ws/v1/clusters",
-		getClusterInfo,
-	},
+func getRoutes(rh *RESTHandler) routes {
+	return []route{
+		// endpoints to retrieve general cluster info
+		{
+			"Cluster",
+			"GET",
+			"/ws/v1/clusters",
+			rh.getClusterInfo,
+		},
 
-	// endpoint to retrieve goroutines info
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/stack",
-		getStackInfo,
-	},
+		// endpoint to retrieve goroutines info
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/stack",
+			rh.getStackInfo,
+		},
 
-	// endpoint to retrieve server metrics
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/metrics",
-		getMetrics,
-	},
+		// endpoint to retrieve server metrics
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/metrics",
+			rh.getMetrics,
+		},
 
-	// endpoint to retrieve the current conf
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/config",
-		getClusterConfig,
-	},
+		// endpoint to retrieve the current conf
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/config",
+			rh.getClusterConfig,
+		},
 
-	// endpoint to validate conf
-	route{
-		"Scheduler",
-		"POST",
-		"/ws/v1/validate-conf",
-		validateConf,
-	},
+		// endpoint to validate conf
+		{
+			"Scheduler",
+			"POST",
+			"/ws/v1/validate-conf",
+			rh.validateConf,
+		},
 
-	// endpoint to retrieve historical data
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/history/apps",
-		getApplicationHistory,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/history/containers",
-		getContainerHistory,
-	},
-	route{
-		"Partitions",
-		"GET",
-		"/ws/v1/partitions",
-		getPartitions,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/placementrules",
-		getPartitionRules,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/queues",
-		getPartitionQueues,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/queue/:queue",
-		getPartitionQueue,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/nodes",
-		getPartitionNodes,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/node/:node",
-		getPartitionNode,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/queue/:queue/applications",
-		getQueueApplications,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/queue/:queue/application/:application",
-		getApplication,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/application/:application",
-		getApplication,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/applications/:state",
-		getPartitionApplicationsByState,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/usage/users",
-		getUsersResourceUsage,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/usage/user/:user",
-		getUserResourceUsage,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/usage/groups",
-		getGroupsResourceUsage,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/partition/:partition/usage/group/:group",
-		getGroupResourceUsage,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/fullstatedump",
-		getFullStateDump,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/events/batch",
-		getEvents,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/events/stream",
-		getStream,
-	},
-	// endpoint to retrieve CPU, Memory profiling data,
-	// this works with pprof tool. By default, pprof endpoints
-	// are only registered to http.DefaultServeMux. Here, we
-	// need to explicitly register all handlers.
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/heap",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/threadcreate",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/goroutine",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/allocs",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/block",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/mutex",
-		HandlerFunc: pprof.Index,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/cmdline",
-		HandlerFunc: pprof.Cmdline,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/profile",
-		HandlerFunc: pprof.Profile,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/symbol",
-		HandlerFunc: pprof.Symbol,
-	},
-	route{
-		Name:        "System",
-		Method:      "GET",
-		Pattern:     "/debug/pprof/trace",
-		HandlerFunc: pprof.Trace,
-	},
-	// endpoint to check health status
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/scheduler/healthcheck",
-		checkHealthStatus,
-	},
-	// Deprecated - To be removed in next major release. Replaced with /ws/v1/scheduler/node-utilizations
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/scheduler/node-utilization",
-		getNodeUtilisation,
-	},
-	route{
-		"Scheduler",
-		"GET",
-		"/ws/v1/scheduler/node-utilizations",
-		getNodeUtilisations,
-	},
+		// endpoint to retrieve historical data
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/history/apps",
+			rh.getApplicationHistory,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/history/containers",
+			rh.getContainerHistory,
+		},
+		{
+			"Partitions",
+			"GET",
+			"/ws/v1/partitions",
+			rh.getPartitions,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/placementrules",
+			rh.getPartitionRules,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/queues",
+			rh.getPartitionQueues,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/queue/:queue",
+			rh.getPartitionQueue,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/nodes",
+			rh.getPartitionNodes,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/node/:node",
+			rh.getPartitionNode,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/queue/:queue/applications",
+			rh.getQueueApplications,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/queue/:queue/application/:application",
+			rh.getApplication,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/application/:application",
+			rh.getApplication,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/applications/:state",
+			rh.getPartitionApplicationsByState,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/usage/users",
+			rh.getUsersResourceUsage,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/usage/user/:user",
+			rh.getUserResourceUsage,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/usage/groups",
+			rh.getGroupsResourceUsage,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/partition/:partition/usage/group/:group",
+			rh.getGroupResourceUsage,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/fullstatedump",
+			getFullStateDump,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/events/batch",
+			rh.getEvents,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/events/stream",
+			rh.getStream,
+		},
+		// endpoint to retrieve CPU, Memory profiling data,
+		// this works with pprof tool. By default, pprof endpoints
+		// are only registered to http.DefaultServeMux. Here, we
+		// need to explicitly register all handlers.
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/heap",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/threadcreate",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/goroutine",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/allocs",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/block",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/mutex",
+			HandlerFunc: pprof.Index,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/cmdline",
+			HandlerFunc: pprof.Cmdline,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/profile",
+			HandlerFunc: pprof.Profile,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/symbol",
+			HandlerFunc: pprof.Symbol,
+		},
+		{
+			Name:        "System",
+			Method:      "GET",
+			Pattern:     "/debug/pprof/trace",
+			HandlerFunc: pprof.Trace,
+		},
+		// endpoint to check health status
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/scheduler/healthcheck",
+			rh.checkHealthStatus,
+		},
+		// Deprecated - To be removed in next major release. Replaced with /ws/v1/scheduler/node-utilizations
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/scheduler/node-utilization",
+			rh.getNodeUtilisation,
+		},
+		{
+			"Scheduler",
+			"GET",
+			"/ws/v1/scheduler/node-utilizations",
+			rh.getNodeUtilisations,
+		},
+	}
 }
