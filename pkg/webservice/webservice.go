@@ -33,16 +33,19 @@ import (
 	"github.com/apache/yunikorn-core/pkg/scheduler"
 )
 
-var imHistory *history.InternalMetricsHistory
-var schedulerContext *scheduler.ClusterContext
+/*var imHistory *history.InternalMetricsHistory
+var schedulerContext *scheduler.ClusterContext*/
 
 type WebService struct {
-	httpServer *http.Server
+	httpServer       *http.Server
+	imHistory        *history.InternalMetricsHistory
+	schedulerContext *scheduler.ClusterContext
 }
 
-func newRouter() *httprouter.Router {
+func (m *WebService) newRouter() *httprouter.Router {
+	restHandler := NewRESTHandler(m.imHistory, m.schedulerContext)
 	router := httprouter.New()
-	for _, webRoute := range webRoutes {
+	for _, webRoute := range getRoutes(restHandler) {
 		handler := loggingHandler(webRoute.HandlerFunc, webRoute.Name)
 		router.Handler(webRoute.Method, webRoute.Pattern, handler)
 	}
@@ -63,7 +66,7 @@ func loggingHandler(inner http.Handler, name string) http.HandlerFunc {
 
 // StartWebApp starts the web app on the default port.
 func (m *WebService) StartWebApp() {
-	router := newRouter()
+	router := m.newRouter()
 	m.httpServer = &http.Server{
 		Addr:              ":9080",
 		Handler:           router,
@@ -81,10 +84,10 @@ func (m *WebService) StartWebApp() {
 }
 
 func NewWebApp(context *scheduler.ClusterContext, internalMetrics *history.InternalMetricsHistory) *WebService {
-	m := &WebService{}
-	schedulerContext = context
-	imHistory = internalMetrics
-	return m
+	return &WebService{
+		schedulerContext: context,
+		imHistory:        internalMetrics,
+	}
 }
 
 func (m *WebService) StopWebApp() error {

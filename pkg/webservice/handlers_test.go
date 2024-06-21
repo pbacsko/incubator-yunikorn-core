@@ -292,7 +292,7 @@ var (
 // setup To take care of setting up config, cluster, partitions etc
 func setup(t *testing.T, config string, partitionCount int) *scheduler.PartitionContext {
 	var err error
-	schedulerContext, err = scheduler.NewClusterContext(rmID, policyGroup, []byte(config))
+	schedulerContext, err := scheduler.NewClusterContext(rmID, policyGroup, []byte(config))
 	assert.NilError(t, err, "Error when load clusterInfo from config")
 
 	assert.Equal(t, partitionCount, len(schedulerContext.GetPartitionMapClone()))
@@ -302,6 +302,14 @@ func setup(t *testing.T, config string, partitionCount int) *scheduler.Partition
 	part := schedulerContext.GetPartition(partitionName)
 	assert.Equal(t, 0, len(part.GetApplications()))
 	return part
+}
+
+func setup2(t *testing.T, config string, partitionCount int) *scheduler.ClusterContext {
+	var err error
+	schedulerContext, err := scheduler.NewClusterContext(rmID, policyGroup, []byte(config))
+	assert.NilError(t, err, "Error when load clusterInfo from config")
+	assert.Equal(t, partitionCount, len(schedulerContext.GetPartitionMapClone()))
+	return schedulerContext
 }
 
 // simple wrapper to make creating an app easier
@@ -338,12 +346,13 @@ func TestValidateConf(t *testing.T) {
 			},
 		},
 	}
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
 	for _, test := range confTests {
 		// No err check: new request always returns correctly
 		//nolint: errcheck
 		req, _ := http.NewRequest("POST", "", strings.NewReader(test.content))
 		resp := &MockResponseWriter{}
-		validateConf(resp, req)
+		rh.validateConf(resp, req)
 		var vcr dao.ValidateConfResponse
 		err := json.Unmarshal(resp.outputBytes, &vcr)
 		assert.NilError(t, err, unmarshalError)
@@ -379,12 +388,13 @@ func TestUserGroupLimits(t *testing.T) {
 			},
 		},
 	}
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
 	for _, test := range confTests {
 		// No err check: new request always returns correctly
 		//nolint: errcheck
 		req, _ := http.NewRequest("POST", "", strings.NewReader(test.content))
 		resp := &MockResponseWriter{}
-		validateConf(resp, req)
+		rh.validateConf(resp, req)
 		var vcr dao.ValidateConfResponse
 		err := json.Unmarshal(resp.outputBytes, &vcr)
 		assert.NilError(t, err, unmarshalError)
@@ -400,8 +410,9 @@ func TestApplicationHistory(t *testing.T) {
 	//nolint: errcheck
 	req, _ := http.NewRequest("GET", "", strings.NewReader(""))
 	resp := &MockResponseWriter{}
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
 	// no init should return nothing
-	getApplicationHistory(resp, req)
+	rh.getApplicationHistory(resp, req)
 
 	var errInfo dao.YAPIError
 	err := json.Unmarshal(resp.outputBytes, &errInfo)
@@ -411,9 +422,10 @@ func TestApplicationHistory(t *testing.T) {
 	assert.Equal(t, errInfo.StatusCode, http.StatusInternalServerError)
 
 	// init should return null and thus no records
-	imHistory = history.NewInternalMetricsHistory(5)
+	imHistory := history.NewInternalMetricsHistory(5)
+	rh = NewRESTHandler(imHistory, setup2(t, configDefault, 1))
 	resp = &MockResponseWriter{}
-	getApplicationHistory(resp, req)
+	rh.getApplicationHistory(resp, req)
 	var appHist []dao.ApplicationHistoryDAOInfo
 	err = json.Unmarshal(resp.outputBytes, &appHist)
 	assert.NilError(t, err, unmarshalError)
@@ -426,7 +438,7 @@ func TestApplicationHistory(t *testing.T) {
 	imHistory.Store(2, 0)
 	imHistory.Store(30, 0)
 	resp = &MockResponseWriter{}
-	getApplicationHistory(resp, req)
+	rh.getApplicationHistory(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &appHist)
 	assert.NilError(t, err, unmarshalError)
 	assert.Equal(t, resp.statusCode, 0, "app response should have no status")
@@ -440,7 +452,7 @@ func TestApplicationHistory(t *testing.T) {
 	imHistory.Store(50, 0)
 	imHistory.Store(300, 0)
 	resp = &MockResponseWriter{}
-	getApplicationHistory(resp, req)
+	rh.getApplicationHistory(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &appHist)
 	assert.NilError(t, err, unmarshalError)
 	assert.Equal(t, resp.statusCode, 0, "app response should have no status")
@@ -457,7 +469,8 @@ func TestContainerHistory(t *testing.T) {
 	req, _ := http.NewRequest("GET", "", strings.NewReader(""))
 	resp := &MockResponseWriter{}
 	// no init should return nothing
-	getContainerHistory(resp, req)
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
+	rh.getContainerHistory(resp, req)
 
 	var errInfo dao.YAPIError
 	err := json.Unmarshal(resp.outputBytes, &errInfo)
@@ -467,9 +480,10 @@ func TestContainerHistory(t *testing.T) {
 	assert.Equal(t, errInfo.StatusCode, http.StatusInternalServerError)
 
 	// init should return null and thus no records
-	imHistory = history.NewInternalMetricsHistory(5)
+	imHistory := history.NewInternalMetricsHistory(5)
 	resp = &MockResponseWriter{}
-	getContainerHistory(resp, req)
+	rh = NewRESTHandler(imHistory, setup2(t, configDefault, 1))
+	rh.getContainerHistory(resp, req)
 	var contHist []dao.ContainerHistoryDAOInfo
 	err = json.Unmarshal(resp.outputBytes, &contHist)
 	assert.NilError(t, err, unmarshalError)
@@ -482,7 +496,7 @@ func TestContainerHistory(t *testing.T) {
 	imHistory.Store(0, 2)
 	imHistory.Store(0, 30)
 	resp = &MockResponseWriter{}
-	getContainerHistory(resp, req)
+	rh.getContainerHistory(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &contHist)
 	assert.NilError(t, err, unmarshalError)
 	assert.Equal(t, resp.statusCode, 0, "container response should have no status")
@@ -496,7 +510,7 @@ func TestContainerHistory(t *testing.T) {
 	imHistory.Store(0, 50)
 	imHistory.Store(0, 300)
 	resp = &MockResponseWriter{}
-	getContainerHistory(resp, req)
+	rh.getContainerHistory(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &contHist)
 	assert.NilError(t, err, unmarshalError)
 	assert.Equal(t, resp.statusCode, 0, "container response should have no status")
@@ -506,17 +520,16 @@ func TestContainerHistory(t *testing.T) {
 }
 
 func TestGetConfigYAML(t *testing.T) {
-	var err error
-	schedulerContext, err = scheduler.NewClusterContext(rmID, policyGroup, []byte(startConf))
-	assert.NilError(t, err, "Error when load clusterInfo from config")
 	// No err check: new request always returns correctly
 	//nolint: errcheck
 	req, _ := http.NewRequest("GET", "", nil)
 	resp := &MockResponseWriter{}
-	getClusterConfig(resp, req)
+	schedulerContext := setup2(t, startConf, 1)
+	rh := NewRESTHandler(nil, schedulerContext)
+	rh.getClusterConfig(resp, req)
 	// yaml unmarshal handles the checksum add the end automatically in this implementation
 	conf := &dao.ConfigDAOInfo{}
-	err = yaml.Unmarshal(resp.outputBytes, conf)
+	err := yaml.Unmarshal(resp.outputBytes, conf)
 	assert.NilError(t, err, unmarshalError)
 	assert.Equal(t, conf.Partitions[0].NodeSortPolicy.Type, "fair", "node sort policy set incorrectly, not fair")
 
@@ -531,7 +544,7 @@ func TestGetConfigYAML(t *testing.T) {
 	// check that we return yaml by default, unmarshal will error when we don't
 	req.Header.Set("Accept", "unknown")
 	resp = &MockResponseWriter{}
-	getClusterConfig(resp, req)
+	rh.getClusterConfig(resp, req)
 	err = yaml.Unmarshal(resp.outputBytes, conf)
 	assert.NilError(t, err, unmarshalError)
 	assert.Equal(t, conf.Partitions[0].NodeSortPolicy.Type, "binpacking", "node sort policy not updated")
@@ -543,13 +556,14 @@ func TestGetConfigYAML(t *testing.T) {
 }
 
 func TestGetConfigJSON(t *testing.T) {
-	setup(t, startConf, 1)
+	schedulerContext := setup2(t, startConf, 1)
+	rh := NewRESTHandler(nil, setup2(t, startConf, 1))
 	// No err check: new request always returns correctly
 	//nolint: errcheck
 	req, _ := http.NewRequest("GET", "", nil)
 	req.Header.Set("Accept", "application/json")
 	resp := &MockResponseWriter{}
-	getClusterConfig(resp, req)
+	rh.getClusterConfig(resp, req)
 
 	conf := &dao.ConfigDAOInfo{}
 	err := json.Unmarshal(resp.outputBytes, conf)
@@ -563,7 +577,7 @@ func TestGetConfigJSON(t *testing.T) {
 	configs.SetConfigMap(updatedExtraConf)
 
 	resp = &MockResponseWriter{}
-	getClusterConfig(resp, req)
+	rh.getClusterConfig(resp, req)
 	err = json.Unmarshal(resp.outputBytes, conf)
 	assert.NilError(t, err, unmarshalError)
 	assert.Assert(t, startConfSum != conf.Checksum, "checksums did not change in json output: %s, %s", startConfSum, conf.Checksum)
@@ -575,7 +589,7 @@ func TestGetConfigJSON(t *testing.T) {
 }
 
 func TestGetClusterUtilJSON(t *testing.T) {
-	setup(t, configDefault, 1)
+	schedulerContext := setup2(t, configDefault, 1)
 
 	// check build information of RM
 	buildInfoMap := make(map[string]string)
@@ -734,13 +748,13 @@ func TestGetNodeUtilisation(t *testing.T) {
 	assert.NilError(t, err, "Get node utilisation Handler request failed")
 	req = req.WithContext(context.TODO())
 	resp := &MockResponseWriter{}
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
 
-	getNodeUtilisation(resp, req)
+	rh.getNodeUtilisation(resp, req)
 	var errInfo dao.YAPIError
 	err = json.Unmarshal(resp.outputBytes, &errInfo)
 	assert.NilError(t, err, "getNodeUtilisation should have returned and error")
 
-	partition := setup(t, configDefault, 1)
 	utilisation := &dao.NodesUtilDAOInfo{}
 	err = json.Unmarshal(resp.outputBytes, utilisation)
 	assert.NilError(t, err, "getNodeUtilisation should have returned an empty object")
@@ -749,12 +763,16 @@ func TestGetNodeUtilisation(t *testing.T) {
 	assert.Assert(t, confirmNodeCount(utilisation.NodesUtil, 0), "unexpected number of nodes returned should be 0")
 
 	// create test nodes
-	node1 := addNode(t, partition, "node-1", resources.NewResourceFromMap(map[string]resources.Quantity{"first": 10}))
-	node2 := addNode(t, partition, "node-2", resources.NewResourceFromMap(map[string]resources.Quantity{"first": 10, "second": 5}))
+	node1ID := "node-1"
+	node2ID := "node-2"
+	schedulerContext := setup2(t, configDefault, 1)
+	node1 := addNode(t, schedulerContext.GetPartition("default"), node1ID, resources.NewResourceFromMap(map[string]resources.Quantity{"first": 10}))
+	node2 := addNode(t, schedulerContext.GetPartition("default"), node2ID, resources.NewResourceFromMap(map[string]resources.Quantity{"first": 10, "second": 5}))
 
 	// get nodes utilization
 	resp = &MockResponseWriter{}
-	getNodeUtilisation(resp, req)
+	rh = NewRESTHandler(nil, schedulerContext)
+	rh.getNodeUtilisation(resp, req)
 	utilisation = &dao.NodesUtilDAOInfo{}
 	err = json.Unmarshal(resp.outputBytes, utilisation)
 	assert.NilError(t, err, "getNodeUtilisation should have returned an object")
@@ -766,12 +784,12 @@ func TestGetNodeUtilisation(t *testing.T) {
 	ask := objects.NewAllocationAsk("alloc-1", "app", resAlloc)
 	alloc := markAllocated(node1.NodeID, ask)
 	assert.Assert(t, node1.AddAllocation(alloc), "unexpected failure adding allocation to node")
-	rootQ := partition.GetQueue("root")
+	rootQ := schedulerContext.GetPartition("default").GetQueue("root")
 	err = rootQ.IncAllocatedResource(resAlloc, false)
 	assert.NilError(t, err, "unexpected error returned setting allocated resource on queue")
 	// get nodes utilization
 	resp = &MockResponseWriter{}
-	getNodeUtilisation(resp, req)
+	rh.getNodeUtilisation(resp, req)
 	utilisation = &dao.NodesUtilDAOInfo{}
 	err = json.Unmarshal(resp.outputBytes, utilisation)
 	assert.NilError(t, err, "getNodeUtilisation should have returned an object")
@@ -788,7 +806,7 @@ func TestGetNodeUtilisation(t *testing.T) {
 	assert.NilError(t, err, "unexpected error returned setting allocated resource on queue")
 	// get nodes utilization
 	resp = &MockResponseWriter{}
-	getNodeUtilisation(resp, req)
+	rh.getNodeUtilisation(resp, req)
 	utilisation = &dao.NodesUtilDAOInfo{}
 	err = json.Unmarshal(resp.outputBytes, utilisation)
 	assert.NilError(t, err, "getNodeUtilisation should have returned an object")
@@ -873,20 +891,19 @@ func TestGetPartitionNodesUtilJSON(t *testing.T) {
 }
 
 func TestGetNodeUtilisations(t *testing.T) {
-	// setup
-	NewWebApp(&scheduler.ClusterContext{}, nil)
 	req, err := http.NewRequest("GET", "/ws/v1/scheduler/node-utilizations", strings.NewReader(""))
 	assert.NilError(t, err, "Get node utilisations Handler request failed")
 	resp := &MockResponseWriter{}
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
 
-	getNodeUtilisations(resp, req)
+	rh.getNodeUtilisations(resp, req)
 	var partitionNodesUtilDAOInfo []*dao.PartitionNodesUtilDAOInfo
 	err = json.Unmarshal(resp.outputBytes, &partitionNodesUtilDAOInfo)
 	assert.NilError(t, err, "should decode a empty list of *dao.PartitionNodesUtilDAOInfo")
 	assert.Equal(t, len(partitionNodesUtilDAOInfo), 0)
 
 	// setup partitions
-	schedulerContext, err = scheduler.NewClusterContext(rmID, policyGroup, []byte(configMultiPartitions))
+	schedulerContext := setup2(t, configMultiPartitions, 1)
 	assert.NilError(t, err, "Error when load clusterInfo from config")
 	schedulerContext.GetPartition("default")
 	defaultPartition := schedulerContext.GetPartition(common.GetNormalizedPartitionName("default", rmID))
@@ -905,7 +922,8 @@ func TestGetNodeUtilisations(t *testing.T) {
 
 	// get nodes utilizations
 	resp = &MockResponseWriter{}
-	getNodeUtilisations(resp, req)
+	rh = NewRESTHandler(nil, schedulerContext)
+	rh.getNodeUtilisations(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &partitionNodesUtilDAOInfo)
 	assert.NilError(t, err, "should decode a list of *dao.PartitionNodesUtilDAOInfo")
 	assert.Equal(t, len(partitionNodesUtilDAOInfo), 2)
@@ -950,21 +968,22 @@ func getNodesUtilByType(t *testing.T, nodesUtilList []*dao.NodesUtilDAOInfo, res
 }
 
 func TestPartitions(t *testing.T) {
-	schedulerContext = &scheduler.ClusterContext{}
-
 	var req *http.Request
 	req, err := http.NewRequest("GET", "/ws/v1/partitions", strings.NewReader(""))
 	assert.NilError(t, err, "App Handler request failed")
 
 	resp := &MockResponseWriter{}
+
 	var partitionInfo []*dao.PartitionInfo
-	getPartitions(resp, req)
+	rh := NewRESTHandler(nil, setup2(t, configDefault, 1))
+	rh.getPartitions(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &partitionInfo)
 	assert.NilError(t, err, unmarshalError)
 	assert.Check(t, partitionInfo != nil, "partitionInfo should not be nil")
 	assert.Equal(t, len(partitionInfo), 0)
 
-	defaultPartition := setup(t, configMultiPartitions, 2)
+	schedulerContext := setup2(t, configMultiPartitions, 2)
+	defaultPartition := schedulerContext.GetPartition("default")
 	partitionName := defaultPartition.Name
 
 	// add a new app
@@ -994,8 +1013,6 @@ func TestPartitions(t *testing.T) {
 	app6 := addAndConfirmApplicationExists(t, partitionName, defaultPartition, "app-6")
 	app6.SetState(objects.Failed.String())
 
-	NewWebApp(schedulerContext, nil)
-
 	// create test nodes
 	nodeRes := resources.NewResourceFromMap(map[string]resources.Quantity{siCommon.Memory: 500, siCommon.CPU: 500}).ToProto()
 	node1ID := "node-1"
@@ -1018,7 +1035,7 @@ func TestPartitions(t *testing.T) {
 	req, err = http.NewRequest("GET", "/ws/v1/partitions", strings.NewReader(""))
 	assert.NilError(t, err, "App Handler request failed")
 	resp = &MockResponseWriter{}
-	getPartitions(resp, req)
+	rh.getPartitions(resp, req)
 	err = json.Unmarshal(resp.outputBytes, &partitionInfo)
 	assert.NilError(t, err, unmarshalError)
 
