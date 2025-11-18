@@ -72,6 +72,8 @@ type Allocation struct {
 	release               *Allocation // placeholder to be released for this allocation
 	preempted             bool        // whether this allocation has been marked for preemption
 	instType              string      // the instance type of the node at the time this allocation was bound
+	bound                 bool        // allocation has been bound in the shim
+	cancelAttempted       bool        // whether we already tried to cancel an unbound allocation or not
 
 	locking.RWMutex
 }
@@ -149,6 +151,7 @@ func NewAllocationFromSI(alloc *si.Allocation) *Allocation {
 		bindTime:          bindTime,
 		foreign:           foreign,
 		preemptable:       preemptable,
+		bound:             alloc.Bound,
 	}
 }
 
@@ -601,4 +604,28 @@ func (a *Allocation) IsPreemptable() bool {
 
 func (a *Allocation) GetAllocationName() string {
 	return a.tags[siCommon.DomainYuniKorn+siCommon.KeyPodName]
+}
+
+func (a *Allocation) IsBound() bool {
+	a.RLock()
+	defer a.RUnlock()
+	return a.bound
+}
+
+func (a *Allocation) MarkBound() {
+	a.Lock()
+	defer a.Unlock()
+	a.bound = true
+}
+
+func (a *Allocation) CancelAttempted() bool {
+	a.RLock()
+	defer a.RUnlock()
+	return a.cancelAttempted
+}
+
+func (a *Allocation) MarkCancelAttempted() {
+	a.Lock()
+	defer a.Unlock()
+	a.cancelAttempted = true
 }

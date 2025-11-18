@@ -62,6 +62,7 @@ require (
 )
 
 replace (
+	github.com/apache/yunikorn-scheduler-interface => ../yunikorn-scheduler-interface
 	golang.org/x/crypto => golang.org/x/crypto v0.35.0
 	golang.org/x/net => golang.org/x/net v0.43.0
 	golang.org/x/sys => golang.org/x/sys v0.35.0

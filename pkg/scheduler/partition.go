@@ -1164,13 +1164,20 @@ func (pc *PartitionContext) UpdateAllocation(alloc *objects.Allocation) (request
 	applicationID := alloc.GetApplicationID()
 	nodeID := alloc.GetNodeID()
 	node := pc.GetNode(alloc.GetNodeID())
+	var existingNode *objects.Node
 
 	log.Log(log.SchedPartition).Info("processing allocation",
 		zap.String("partitionName", pc.Name),
 		zap.String("appID", applicationID),
 		zap.String("allocationKey", allocationKey))
 
+	defer func() {
+		if existingNode != nil {
+			pc.evictAllocationIfAvailableIsNegative(existingNode)
+		}
+	}()
 	if alloc.IsForeign() {
+		existingNode = node
 		return pc.handleForeignAllocation(allocationKey, applicationID, nodeID, node, alloc)
 	}
 
@@ -1254,13 +1261,15 @@ func (pc *PartitionContext) UpdateAllocation(alloc *objects.Allocation) (request
 		return false, true, nil
 	}
 
-	var existingNode *objects.Node = nil
 	if existing.IsAllocated() {
 		existingNode = pc.GetNode(existing.GetNodeID())
 		if existingNode == nil {
 			metrics.GetSchedulerMetrics().IncSchedulingError()
 			return false, false, fmt.Errorf("failed to find node %s", existing.GetNodeID())
 		}
+	}
+	if alloc.IsBound() {
+		existing.MarkBound()
 	}
 
 	// since this is an update, check for resource change and process that first
@@ -1714,4 +1723,21 @@ func (pc *PartitionContext) getReservationCount() int {
 	pc.RLock()
 	defer pc.RUnlock()
 	return pc.reservations
+}
+
+func (pc *PartitionContext) evictAllocationIfAvailableIsNegative(node *objects.Node) {
+	if node.GetAvailableResource().HasNegativeValue() {
+		allocPerApps := make(map[*objects.Application][]*objects.Allocation)
+		for _, ykAlloc := range node.GetYunikornAllocations() {
+			if !ykAlloc.IsBound() && !ykAlloc.CancelAttempted() {
+				ykAlloc.MarkCancelAttempted()
+				appID := ykAlloc.GetApplicationID()
+				app := pc.getApplication(appID)
+				allocPerApps[app] = append(allocPerApps[app], ykAlloc)
+			}
+		}
+		for app, allocs := range allocPerApps {
+			app.NotifyRMAllocationReleased(allocs, si.TerminationType_ALLOCATION_CANCEL, "attempt to cancel allocation")
+		}
+	}
 }

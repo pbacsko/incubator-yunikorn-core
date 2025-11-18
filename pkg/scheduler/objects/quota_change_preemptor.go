@@ -216,7 +216,7 @@ func (qcp *QuotaChangePreemptionContext) preemptVictims() {
 				victim.MarkPreempted()
 				victim.SendPreemptedByQuotaChangeEvent(qcp.queue.GetQueuePath())
 			}
-			app.notifyRMAllocationReleased(victims, si.TerminationType_PREEMPTED_BY_SCHEDULER,
+			app.NotifyRMAllocationReleased(victims, si.TerminationType_PREEMPTED_BY_SCHEDULER,
 				"preempting allocations to enforce new max quota for queue : "+qcp.queue.GetQueuePath())
 		}
 	}
