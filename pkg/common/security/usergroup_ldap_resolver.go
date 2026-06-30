@@ -21,24 +21,43 @@ package security
 import (
 	"crypto/tls"
 	"fmt"
-	"os"
 	"os/user"
-	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
 	"go.uber.org/zap"
 
 	"github.com/apache/yunikorn-core/pkg/common"
+	"github.com/apache/yunikorn-core/pkg/common/configs"
 	"github.com/apache/yunikorn-core/pkg/log"
 )
 
 // This file contains the implementation of the LDAP resolver for user groups
 
 type LdapLookup struct {
+	configHolder *ldapConfigHolder
+	access       LdapAccess
+}
+
+type ldapConfigHolder struct {
+	lock   sync.RWMutex
 	config LdapConfig
-	access LdapAccess
+	valid  bool
+}
+
+func (h *ldapConfigHolder) get() (LdapConfig, bool) {
+	h.lock.RLock()
+	defer h.lock.RUnlock()
+	return h.config, h.valid
+}
+
+func (h *ldapConfigHolder) set(config LdapConfig, valid bool) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	h.config = config
+	h.valid = valid
 }
 
 // LdapAccess defines the interface for LDAP operations
@@ -56,68 +75,58 @@ type LdapAccess interface {
 	Close(conn *ldap.Conn)
 }
 
-type ConfigReader interface {
-	ReadLdapConfig() (*LdapConfig, error)
+type LdapConfigurer interface {
+	GetLdapConfig() (*LdapConfig, error)
 }
 
-type configReaderImpl struct{}
+type ldapConfigurerImpl struct{}
 
-func (configReaderImpl) ReadLdapConfig() (*LdapConfig, error) {
-	secretsDir := common.LdapMountPath
+func (ldapConfigurerImpl) GetLdapConfig() (*LdapConfig, error) {
+	return ReadLdapConfigFromMap(configs.GetConfigMap())
+}
 
-	// Read all files from secrets directory
-	files, err := os.ReadDir(secretsDir)
-	if err != nil {
-		log.Log(log.Security).Error("Unable to access LDAP secrets directory",
-			zap.String("directory", secretsDir),
-			zap.Error(err))
-		return nil, fmt.Errorf("unable to access LDAP secrets directory under %s", secretsDir)
+func init() {
+	configs.AddConfigMapCallback("ldap", onConfigurationChange)
+}
+
+func onConfigurationChange() {
+	if instance == nil || instance.resolverType != Ldap {
+		return
 	}
+	conf, err := ReadLdapConfigFromMap(configs.GetConfigMap())
+	if err != nil {
+		log.Log(log.Security).Warn("LDAP configuration update skipped",
+			zap.Error(err))
+		return
+	}
+	instance.UpdateLdapConfig(*conf)
+}
 
-	secretCount := 0
-	validSecrets := make(map[string]interface{})
-
-	// Iterate over all secret files in the secrets directory
-	for _, file := range files {
-		fileName := file.Name()
-
-		// Skip non-secret entries such as Kubernetes internal metadata (e.g., symlinks like "..data" or directories like "..timestamp")
-		if strings.HasPrefix(fileName, "..") || file.IsDir() {
-			log.Log(log.Security).Info("Ignoring non-secret entry (Kubernetes metadata entry or directory)",
-				zap.String("name", fileName))
-			continue
-		}
-
-		secretKey := fileName
-		secretValueBytes, err := os.ReadFile(filepath.Join(secretsDir, secretKey))
-		if err != nil {
-			log.Log(log.Security).Warn("Could not read secret file",
-				zap.String("file", secretKey),
-				zap.Error(err))
-			continue
-		}
-		secretValue := strings.TrimSpace(string(secretValueBytes))
-
-		// Validate the secret value
-		validatedValue, err := ValidateSecretValue(secretKey, secretValue)
-		if err != nil {
-			log.Log(log.Security).Warn("Invalid LDAP secret value",
-				zap.String("key", secretKey),
-				zap.Error(err))
-			continue
-		}
-
-		// Store the validated value
-		validSecrets[secretKey] = validatedValue
-		secretCount++
-
-		log.Log(log.Security).Debug("Loaded LDAP secret",
-			zap.String("key", secretKey))
+// ReadLdapConfigFromMap builds and validates LDAP configuration from ExtraConfig entries.
+func ReadLdapConfigFromMap(configMap map[string]string) (*LdapConfig, error) {
+	if configMap == nil {
+		return nil, fmt.Errorf("unable to properly load LDAP configuration")
 	}
 
 	ldapConf := getDefaultLdapConfig()
+	validSecrets := make(map[string]interface{})
 
-	// Apply validated values to the configuration
+	for key, value := range configMap {
+		fieldName, ok := ldapFieldFromExtraConfigKey(key)
+		if !ok {
+			continue
+		}
+		secretValue := strings.TrimSpace(value)
+		validatedValue, err := ValidateSecretValue(fieldName, secretValue)
+		if err != nil {
+			log.Log(log.Security).Warn("Invalid LDAP configuration value",
+				zap.String("key", key),
+				zap.Error(err))
+			continue
+		}
+		validSecrets[fieldName] = validatedValue
+	}
+
 	if host, ok := validSecrets[common.LdapHost].(string); ok {
 		ldapConf.Host = host
 	}
@@ -149,11 +158,9 @@ func (configReaderImpl) ReadLdapConfig() (*LdapConfig, error) {
 		ldapConf.useSsl = ssl
 	}
 
-	// Validate the entire configuration
 	validator := NewLdapValidator()
 	isValid := validator.ValidateConfig(ldapConf)
 
-	// Check if all required fields were provided in the secrets
 	requiredFields := []string{
 		common.LdapHost,
 		common.LdapPort,
@@ -178,20 +185,26 @@ func (configReaderImpl) ReadLdapConfig() (*LdapConfig, error) {
 		isValid = false
 	}
 
-	log.Log(log.Security).Info("Finished loading LDAP secrets",
-		zap.Int("numberOfSecretsLoaded", secretCount),
+	log.Log(log.Security).Info("Finished loading LDAP configuration",
 		zap.Bool("configurationValid", isValid),
 		zap.Int("missingRequiredFields", len(missingFields)))
 
-	if secretCount == 0 || !isValid || len(missingFields) != 0 {
+	if !isValid || len(missingFields) != 0 {
 		return ldapConf, fmt.Errorf("unable to properly load LDAP configuration")
 	}
 
 	return ldapConf, nil
 }
 
-func GetConfigReader() ConfigReader {
-	return configReaderImpl{}
+func ldapFieldFromExtraConfigKey(key string) (string, bool) {
+	if !strings.HasPrefix(key, configs.PrefixLdap) {
+		return "", false
+	}
+	return key[len(configs.PrefixLdap):], true
+}
+
+func GetLdapConfigurer() LdapConfigurer {
+	return ldapConfigurerImpl{}
 }
 
 func getDefaultLdapConfig() *LdapConfig {
@@ -246,32 +259,32 @@ type LdapConfig struct {
 	useSsl       bool
 }
 
-func GetUserGroupCacheLdap(reader ConfigReader, access LdapAccess) *UserGroupCache {
-	config, err := reader.ReadLdapConfig()
-	if err != nil {
-		// Log a FATAL level message - this is very prominent and will typically cause the application to exit
-		log.Log(log.Security).Fatal("LDAP configuration not found or invalid. No secrets were loaded from the secrets directory.",
-			zap.String("secretsPath", common.LdapMountPath),
-			zap.String("resolution", "Ensure LDAP secrets are properly mounted and accessible"))
-
-		// If the Fatal log doesn't cause an exit (depends on logger configuration),
-		// we could also panic here to ensure the application stops
-		panic("LDAP configuration not found or invalid")
-	}
-
+func GetUserGroupCacheLdap(configurer LdapConfigurer, access LdapAccess) *UserGroupCache {
+	configHolder := &ldapConfigHolder{}
 	ldapLookup := &LdapLookup{
-		config: *config,
-		access: access,
+		configHolder: configHolder,
+		access:       access,
 	}
 
-	return &UserGroupCache{
+	cache := &UserGroupCache{
 		ugs:           map[string]*UserGroup{},
 		interval:      cleanerInterval * time.Second,
 		lookup:        ldapLookup.LdapLookupUser,
 		lookupGroupID: ldapLookup.LdapLookupGroupID,
 		groupIds:      ldapLookup.LDAPLookupGroupIds,
 		stop:          make(chan struct{}),
+		resolverType:  Ldap,
+		ldapConfig:    configHolder,
 	}
+
+	if config, err := configurer.GetLdapConfig(); err != nil {
+		log.Log(log.Security).Warn("LDAP configuration not available at startup, LDAP lookups will fail until configuration is provided",
+			zap.Error(err))
+	} else {
+		configHolder.set(*config, true)
+	}
+
+	return cache
 }
 
 // Default linux behaviour: a user is member of the primary group with the same name
@@ -295,7 +308,12 @@ func (LdapLookup) LdapLookupGroupID(gid string) (*user.Group, error) {
 }
 
 func (lu LdapLookup) LDAPLookupGroupIds(osUser *user.User) ([]string, error) {
-	sr, err := ldapSearch(lu.access, lu.config, osUser.Username)
+	config, ok := lu.configHolder.get()
+	if !ok {
+		return nil, fmt.Errorf("LDAP configuration is not available")
+	}
+
+	sr, err := ldapSearch(lu.access, config, osUser.Username)
 	if err != nil {
 		log.Log(log.Security).Error("Failed to connect to LDAP for group lookup",
 			zap.String("user", osUser.Username),

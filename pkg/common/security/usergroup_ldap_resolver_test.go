@@ -21,10 +21,7 @@ package security
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/user"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +30,30 @@ import (
 	"gotest.tools/v3/assert"
 
 	"github.com/apache/yunikorn-core/pkg/common"
+	"github.com/apache/yunikorn-core/pkg/common/configs"
 )
+
+func ldapAccessForUserGroupTests() *LdapAccessMock {
+	return &LdapAccessMock{
+		DialURLFunc: func(string, ...ldap.DialOpt) (*ldap.Conn, error) {
+			return &ldap.Conn{}, nil
+		},
+		BindFunc: func(*ldap.Conn, string, string) error {
+			return nil
+		},
+		SearchFunc: func(_ *ldap.Conn, req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			for _, user := range []string{
+				"testuser1", "testuser", "testuser2", "testuser3", "testuser4", "testuser5", "invalid-gid-user",
+			} {
+				if strings.Contains(req.Filter, user) {
+					return mockLdapSearchResult(user)
+				}
+			}
+			return mockLdapSearchResult("unknown")
+		},
+		CloseFunc: func(*ldap.Conn) {},
+	}
+}
 
 // Mock LDAP search result for testing
 func mockLdapSearchResult(username string) (*ldap.SearchResult, error) {
@@ -106,10 +126,10 @@ type LdapAccessMock struct {
 	Error        error
 }
 
-type ConfigReaderMock struct{}
+type LdapConfigurerMock struct{}
 
-func (ConfigReaderMock) ReadLdapConfig() (*LdapConfig, error) {
-	return &LdapConfig{}, nil
+func (LdapConfigurerMock) GetLdapConfig() (*LdapConfig, error) {
+	return ReadLdapConfigFromMap(configs.GetConfigMap())
 }
 
 func (m *LdapAccessMock) DialURL(url string, options ...ldap.DialOpt) (*ldap.Conn, error) {
@@ -330,9 +350,11 @@ func TestLDAPLookupGroupIds(t *testing.T) {
 	}
 
 	u := &user.User{Username: "testuser"}
+	holder := &ldapConfigHolder{}
+	holder.set(LdapConfig{Host: "localhost", Port: 389}, true)
 	lu := &LdapLookup{
-		access: newMockLdapAccess(mockResult, nil),
-		config: LdapConfig{},
+		access:       newMockLdapAccess(mockResult, nil),
+		configHolder: holder,
 	}
 
 	groups, err := lu.LDAPLookupGroupIds(u)
@@ -343,9 +365,11 @@ func TestLDAPLookupGroupIds(t *testing.T) {
 
 func TestLDAPLookupGroupIdsError(t *testing.T) {
 	u := &user.User{Username: "testuser"}
+	holder := &ldapConfigHolder{}
+	holder.set(LdapConfig{Host: "localhost", Port: 389}, true)
 	lu := &LdapLookup{
-		access: newMockLdapAccess(nil, errors.New("ldap error")),
-		config: LdapConfig{},
+		access:       newMockLdapAccess(nil, errors.New("ldap error")),
+		configHolder: holder,
 	}
 	groups, err := lu.LDAPLookupGroupIds(u)
 	assert.Error(t, err, "ldap error")
@@ -353,14 +377,11 @@ func TestLDAPLookupGroupIdsError(t *testing.T) {
 }
 
 //nolint:funlen // Table-driven test for coverage, helpers used to reduce length
-func TestReadSecrets(t *testing.T) {
-	tests := getReadSecretsTestCases()
+func TestReadLdapConfigFromMap(t *testing.T) {
+	tests := getReadLdapConfigFromMapTestCases()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, cleanup := tt.setupFunc(t)
-			defer cleanup()
-			reader := &configReaderImpl{}
-			ldapConf, err := reader.ReadLdapConfig()
+			ldapConf, err := ReadLdapConfigFromMap(tt.configMap)
 			assert.Equal(t, tt.expectedResult, err == nil)
 			if tt.nilConf && ldapConf == nil {
 				return
@@ -370,227 +391,128 @@ func TestReadSecrets(t *testing.T) {
 	}
 }
 
-//nolint:funlen // Table-driven test helper for coverage, intentionally long
-func getReadSecretsTestCases() []struct {
+func getReadLdapConfigFromMapTestCases() []struct {
 	name           string
-	setupFunc      func(t *testing.T) (string, func())
+	configMap      map[string]string
 	expectedResult bool
 	nilConf        bool
 	validateFunc   func(t *testing.T, conf *LdapConfig)
 } {
 	return []struct {
 		name           string
-		setupFunc      func(t *testing.T) (string, func())
+		configMap      map[string]string
 		expectedResult bool
 		nilConf        bool
 		validateFunc   func(t *testing.T, conf *LdapConfig)
 	}{
 		{
-			name: "Skips K8s metadata and directories",
-			setupFunc: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				err := os.Mkdir(filepath.Join(tmpDir, "..data"), 0755)
-				assert.NilError(t, err)
-				err = os.Mkdir(filepath.Join(tmpDir, "dir1"), 0755)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, "key1"), []byte("value1"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, "..timestamp"), []byte("meta"), 0600)
-				assert.NilError(t, err)
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = tmpDir
-				return tmpDir, func() { common.LdapMountPath = origLdapMountPath }
+			name:           "Empty config map",
+			configMap:      map[string]string{},
+			expectedResult: false,
+			validateFunc: func(t *testing.T, ldapConf *LdapConfig) {
+				assert.Equal(t, common.DefaultLdapHost, ldapConf.Host)
+			},
+		},
+		{
+			name: "Ignores unknown keys",
+			configMap: map[string]string{
+				"ldap.unknownKey": "somevalue",
+				"log.level":       "INFO",
 			},
 			expectedResult: false,
 			validateFunc: func(t *testing.T, ldapConf *LdapConfig) {
 				assert.Equal(t, common.DefaultLdapHost, ldapConf.Host)
-				assert.Equal(t, common.DefaultLdapPort, ldapConf.Port)
-				assert.Equal(t, common.DefaultLdapBaseDN, ldapConf.BaseDN)
-				assert.Equal(t, common.DefaultLdapFilter, ldapConf.Filter)
-				assert.Equal(t, common.DefaultLdapGroupAttr, ldapConf.GroupAttr)
-				assert.Equal(t, strings.Join(common.DefaultLdapReturnAttr, ","), strings.Join(ldapConf.ReturnAttr, ","))
-				assert.Equal(t, common.DefaultLdapBindUser, ldapConf.BindUser)
-				assert.Equal(t, common.DefaultLdapBindPassword, ldapConf.BindPassword)
-				assert.Equal(t, common.DefaultLdapInsecure, ldapConf.Insecure)
-				assert.Equal(t, common.DefaultLdapSSL, ldapConf.useSsl)
-			},
-		},
-		{
-			name: "Handles missing secrets directory",
-			setupFunc: func(t *testing.T) (string, func()) {
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = "/nonexistent"
-				return "/nonexistent", func() { common.LdapMountPath = origLdapMountPath }
-			},
-			expectedResult: false,
-			nilConf:        true,
-			validateFunc:   func(t *testing.T, ldapConf *LdapConfig) {},
-		},
-		{
-			name: "Handles unknown key",
-			setupFunc: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				err := os.WriteFile(filepath.Join(tmpDir, "unknownKey"), []byte("somevalue"), 0600)
-				assert.NilError(t, err)
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = tmpDir
-				return tmpDir, func() { common.LdapMountPath = origLdapMountPath }
-			},
-			expectedResult: false,
-			validateFunc: func(t *testing.T, ldapConf *LdapConfig) {
-				assert.Equal(t, common.DefaultLdapHost, ldapConf.Host)
-				assert.Equal(t, common.DefaultLdapPort, ldapConf.Port)
-				assert.Equal(t, common.DefaultLdapBaseDN, ldapConf.BaseDN)
-				assert.Equal(t, common.DefaultLdapFilter, ldapConf.Filter)
-				assert.Equal(t, common.DefaultLdapGroupAttr, ldapConf.GroupAttr)
-				assert.Equal(t, strings.Join(common.DefaultLdapReturnAttr, ","), strings.Join(ldapConf.ReturnAttr, ","))
-				assert.Equal(t, common.DefaultLdapBindUser, ldapConf.BindUser)
-				assert.Equal(t, common.DefaultLdapBindPassword, ldapConf.BindPassword)
-				assert.Equal(t, common.DefaultLdapInsecure, ldapConf.Insecure)
-				assert.Equal(t, common.DefaultLdapSSL, ldapConf.useSsl)
 			},
 		},
 		{
 			name: "Handles invalid port and bool values",
-			setupFunc: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				err := os.WriteFile(filepath.Join(tmpDir, common.LdapPort), []byte("notanint"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapInsecure), []byte("notabool"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapSSL), []byte("notabool"), 0600)
-				assert.NilError(t, err)
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = tmpDir
-				return tmpDir, func() { common.LdapMountPath = origLdapMountPath }
+			configMap: map[string]string{
+				configs.LdapPortKey:     "notanint",
+				configs.LdapInsecureKey: "notabool",
+				configs.LdapSSLKey:      "notabool",
 			},
 			expectedResult: false,
 			validateFunc: func(t *testing.T, ldapConf *LdapConfig) {
-				// Assert that ldapConf.Port is set to DefaultLdapPort when invalid int value is provided
 				assert.Equal(t, common.DefaultLdapPort, ldapConf.Port)
-
-				// Assert that rest of ldap conf is set to default values
-				assert.Equal(t, common.DefaultLdapHost, ldapConf.Host)
-				assert.Equal(t, common.DefaultLdapBaseDN, ldapConf.BaseDN)
-				assert.Equal(t, common.DefaultLdapFilter, ldapConf.Filter)
-				assert.Equal(t, common.DefaultLdapGroupAttr, ldapConf.GroupAttr)
-				assert.Equal(t, strings.Join(common.DefaultLdapReturnAttr, ","), strings.Join(ldapConf.ReturnAttr, ","))
-				assert.Equal(t, common.DefaultLdapBindUser, ldapConf.BindUser)
-				assert.Equal(t, common.DefaultLdapBindPassword, ldapConf.BindPassword)
-				assert.Equal(t, common.DefaultLdapInsecure, ldapConf.Insecure)
-				assert.Equal(t, common.DefaultLdapSSL, ldapConf.useSsl)
 			},
 		},
 		{
 			name: "Sets custom values",
-			setupFunc: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				err := os.WriteFile(filepath.Join(tmpDir, common.LdapHost), []byte("myhost"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapPort), []byte("1234"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapBaseDN), []byte("dc=test,dc=com"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapFilter), []byte("(&(uid=%s))"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapGroupAttr), []byte("groups"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapReturnAttr), []byte("memberOf,groups"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapBindUser), []byte("binduser"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapBindPassword), []byte("bindpass"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapInsecure), []byte("true"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapSSL), []byte("true"), 0600)
-				assert.NilError(t, err)
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = tmpDir
-				return tmpDir, func() { common.LdapMountPath = origLdapMountPath }
+			configMap: map[string]string{
+				configs.LdapHostKey:         "myhost",
+				configs.LdapPortKey:         "1234",
+				configs.LdapBaseDNKey:       "dc=test,dc=com",
+				configs.LdapFilterKey:       "(&(uid=%s))",
+				configs.LdapGroupAttrKey:    "groups",
+				configs.LdapReturnAttrKey:   "memberOf,groups",
+				configs.LdapBindUserKey:     "binduser",
+				configs.LdapBindPasswordKey: "bindpass",
+				configs.LdapInsecureKey:     "true",
+				configs.LdapSSLKey:          "true",
 			},
 			expectedResult: true,
 			validateFunc: func(t *testing.T, ldapConf *LdapConfig) {
 				assert.Equal(t, "myhost", ldapConf.Host)
-
-				// Use strconv to verify the port value to ensure the import is used
-				portStr := "1234"
-				expectedPort, err := strconv.Atoi(portStr)
-				assert.NilError(t, err, "failed to convert port string to int")
-				assert.Equal(t, expectedPort, ldapConf.Port)
-
+				assert.Equal(t, 1234, ldapConf.Port)
 				assert.Equal(t, "dc=test,dc=com", ldapConf.BaseDN)
-				assert.Equal(t, "(&(uid=%s))", ldapConf.Filter)
-				assert.Equal(t, "groups", ldapConf.GroupAttr)
-				assert.Equal(t, "memberOf,groups", strings.Join(ldapConf.ReturnAttr, ","))
 				assert.Equal(t, "binduser", ldapConf.BindUser)
 				assert.Equal(t, "bindpass", ldapConf.BindPassword)
-
-				// Use strconv to verify boolean values
-				insecureStr := "true"
-				expectedInsecure, err := strconv.ParseBool(insecureStr)
-				assert.NilError(t, err, "failed to convert insecure string to bool")
-				assert.Equal(t, expectedInsecure, ldapConf.Insecure)
-
-				sslStr := "true"
-				expectedSSL, err := strconv.ParseBool(sslStr)
-				assert.NilError(t, err, "failed to convert ssl string to bool")
-				assert.Equal(t, expectedSSL, ldapConf.useSsl)
+				assert.Equal(t, true, ldapConf.Insecure)
+				assert.Equal(t, true, ldapConf.useSsl)
 			},
 		},
 		{
 			name: "Missing required fields",
-			setupFunc: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				err := os.WriteFile(filepath.Join(tmpDir, common.LdapHost), []byte("ldap.example.com"), 0600)
-				assert.NilError(t, err)
-				err = os.WriteFile(filepath.Join(tmpDir, common.LdapPort), []byte("389"), 0600)
-				assert.NilError(t, err)
-				// Missing BaseDN, Filter, GroupAttr, ReturnAttr, BindUser, BindPassword
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = tmpDir
-				return tmpDir, func() { common.LdapMountPath = origLdapMountPath }
+			configMap: map[string]string{
+				configs.LdapHostKey: "ldap.example.com",
+				configs.LdapPortKey: "389",
 			},
 			expectedResult: false,
-			validateFunc: func(_ *testing.T, _ *LdapConfig) {
-				// No specific validation needed - we're testing the return value
-			},
+			validateFunc:   func(_ *testing.T, _ *LdapConfig) {},
 		},
 		{
 			name: "All required fields present",
-			setupFunc: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				requiredFields := map[string]string{
-					common.LdapHost:         "ldap.example.com",
-					common.LdapPort:         "389",
-					common.LdapBaseDN:       "dc=example,dc=com",
-					common.LdapFilter:       "(&(objectClass=user)(sAMAccountName=%s))",
-					common.LdapGroupAttr:    "memberOf",
-					common.LdapReturnAttr:   "memberOf",
-					common.LdapBindUser:     "cn=admin,dc=example,dc=com",
-					common.LdapBindPassword: "password",
-				}
-
-				for key, value := range requiredFields {
-					err := os.WriteFile(filepath.Join(tmpDir, key), []byte(value), 0600)
-					if err != nil {
-						t.Fatalf("failed to write file %s: %v", key, err)
-					}
-				}
-
-				origLdapMountPath := common.LdapMountPath
-				common.LdapMountPath = tmpDir
-				return tmpDir, func() { common.LdapMountPath = origLdapMountPath }
+			configMap: map[string]string{
+				configs.LdapHostKey:         "ldap.example.com",
+				configs.LdapPortKey:         "389",
+				configs.LdapBaseDNKey:       "dc=example,dc=com",
+				configs.LdapFilterKey:       "(&(objectClass=user)(sAMAccountName=%s))",
+				configs.LdapGroupAttrKey:    "memberOf",
+				configs.LdapReturnAttrKey:   "memberOf",
+				configs.LdapBindUserKey:     "cn=admin,dc=example,dc=com",
+				configs.LdapBindPasswordKey: "password",
 			},
 			expectedResult: true,
-			validateFunc: func(_ *testing.T, _ *LdapConfig) {
-				// No specific validation needed - we're testing the return value
-			},
+			validateFunc:   func(_ *testing.T, _ *LdapConfig) {},
 		},
 	}
 }
 
+func TestUpdateLdapConfigFromExtraConfig(t *testing.T) {
+	// LdapResolver only: verifies the ExtraConfig callback updates live LDAP settings on the singleton cache.
+	cache := prepareUserGroupCache(t, ldapResolver)
+	config, valid := cache.ldapConfig.get()
+	assert.Equal(t, true, valid)
+	assert.Equal(t, "ldap.example.com", config.Host)
+
+	configs.SetConfigMap(map[string]string{
+		configs.LdapHostKey:         "updated.example.com",
+		configs.LdapPortKey:         "389",
+		configs.LdapBaseDNKey:       "dc=example,dc=com",
+		configs.LdapFilterKey:       "(&(uid=%s))",
+		configs.LdapGroupAttrKey:    "memberOf",
+		configs.LdapReturnAttrKey:   "memberOf",
+		configs.LdapBindUserKey:     "binduser",
+		configs.LdapBindPasswordKey: "bindpass",
+	})
+
+	config, valid = cache.ldapConfig.get()
+	assert.Equal(t, true, valid)
+	assert.Equal(t, "updated.example.com", config.Host)
+}
+
 func TestUserGroupCacheLdap(t *testing.T) {
+	// LdapResolver only: checks LDAP cache wiring (lookup funcs, interval); no cross-resolver behaviour.
 	tests := []struct {
 		name         string
 		validateFunc func(t *testing.T, cache *UserGroupCache)
@@ -617,9 +539,7 @@ func TestUserGroupCacheLdap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Get the LDAP user group cache
-			cache := GetUserGroupCacheLdap(&ConfigReaderMock{}, newMockLdapAccess(nil, nil))
-			// Run the validation function
+			cache := prepareUserGroupCache(t, ldapResolver)
 			tt.validateFunc(t, cache)
 		})
 	}

@@ -55,6 +55,5 @@ const (
 )
 
 var (
-	LdapMountPath         = "/run/secrets/ldap"
 	DefaultLdapReturnAttr = []string{"memberOf"}
 )

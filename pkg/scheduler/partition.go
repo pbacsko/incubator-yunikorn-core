@@ -137,7 +137,7 @@ func (pc *PartitionContext) initialPartitionFromConfig(conf configs.PartitionCon
 	// Placing an application will not have a lock on the partition context.
 	pc.placementManager = placement.NewPlacementManager(conf.PlacementRules, pc.GetQueue, silence)
 	// get the user group cache for the partition
-	pc.userGroupCache = security.GetUserGroupCache(conf.UserGroupResolver, security.GetConfigReader(), security.GetLdapAccess())
+	pc.userGroupCache = security.GetUserGroupCache(conf.UserGroupResolver, security.GetLdapConfigurer(), security.GetLdapAccess())
 	pc.updateNodeSortingPolicy(conf, silence)
 	pc.updatePreemption(conf)
 

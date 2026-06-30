@@ -29,8 +29,20 @@ const (
 	// prefixes
 	PrefixEvent  = "event."
 	PrefixHealth = "health."
+	PrefixLdap   = "ldap."
 
 	HealthCheckInterval = PrefixHealth + "checkInterval"
+
+	LdapHostKey         = PrefixLdap + "Host"
+	LdapPortKey         = PrefixLdap + "Port"
+	LdapBaseDNKey       = PrefixLdap + "BaseDN"
+	LdapFilterKey       = PrefixLdap + "Filter"
+	LdapGroupAttrKey    = PrefixLdap + "GroupAttr"
+	LdapReturnAttrKey   = PrefixLdap + "ReturnAttr"
+	LdapBindUserKey     = PrefixLdap + "BindUser"
+	LdapBindPasswordKey = PrefixLdap + "BindPassword"
+	LdapInsecureKey     = PrefixLdap + "Insecure"
+	LdapSSLKey          = PrefixLdap + "SSL"
 
 	// events
 	CMEventTrackingEnabled    = PrefixEvent + "trackingEnabled"    // Application Tracking

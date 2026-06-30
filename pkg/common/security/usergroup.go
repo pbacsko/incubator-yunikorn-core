@@ -55,6 +55,8 @@ type UserGroupCache struct {
 	lookupGroupID func(gid string) (*user.Group, error)
 	groupIds      func(osUser *user.User) ([]string, error)
 	stop          chan struct{}
+	resolverType  string
+	ldapConfig    *ldapConfigHolder
 }
 
 // The structure of the entry in the cache.
@@ -78,7 +80,7 @@ const (
 // * OS resolver: uses the OS libraries to resolve user and group memberships
 // * Test resolver: fake resolution for testing
 // * Ldap resolver: uses the LDAP protocol to resolve user and group memberships
-func GetUserGroupCache(ugr configs.UserGroupResolver, ldapConfigReader ConfigReader, ldapAccess LdapAccess) *UserGroupCache {
+func GetUserGroupCache(ugr configs.UserGroupResolver, ldapConfigurer LdapConfigurer, ldapAccess LdapAccess) *UserGroupCache {
 	resolver := ugr.Type
 	once.Do(func() {
 		switch resolver {
@@ -90,7 +92,7 @@ func GetUserGroupCache(ugr configs.UserGroupResolver, ldapConfigReader ConfigRea
 			instance = GetUserGroupCacheOS()
 		case Ldap:
 			log.Log(log.Security).Info("creating LDAP user group resolver")
-			instance = GetUserGroupCacheLdap(ldapConfigReader, ldapAccess)
+			instance = GetUserGroupCacheLdap(ldapConfigurer, ldapAccess)
 		default:
 			log.Log(log.Security).Info("creating UserGroupCache without resolver")
 			instance = GetUserGroupNoResolve()
@@ -134,6 +136,16 @@ func (c *UserGroupCache) cleanUpCache() {
 			delete(c.ugs, key)
 		}
 	}
+}
+
+// UpdateLdapConfig replaces the active LDAP configuration and clears cached user/group entries.
+func (c *UserGroupCache) UpdateLdapConfig(config LdapConfig) {
+	if c == nil || c.ldapConfig == nil {
+		return
+	}
+	c.ldapConfig.set(config, true)
+	c.resetCache()
+	log.Log(log.Security).Info("LDAP configuration updated")
 }
 
 // reset the cached content, test use only

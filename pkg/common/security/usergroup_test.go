@@ -71,7 +71,47 @@ var ldapResolver = configs.UserGroupResolver{
 	Type: "ldap",
 }
 
+func validLdapExtraConfig() map[string]string {
+	return map[string]string{
+		configs.LdapHostKey:         "ldap.example.com",
+		configs.LdapPortKey:         "389",
+		configs.LdapBaseDNKey:       "dc=example,dc=com",
+		configs.LdapFilterKey:       "(&(uid=%s))",
+		configs.LdapGroupAttrKey:    "memberOf",
+		configs.LdapReturnAttrKey:   "memberOf",
+		configs.LdapBindUserKey:     "binduser",
+		configs.LdapBindPasswordKey: "bindpass",
+	}
+}
+
+func stopUserGroupCacheIfRunning() {
+	if instance != nil {
+		instance.Stop()
+	}
+	configs.SetConfigMap(map[string]string{})
+}
+
+func prepareUserGroupCache(t *testing.T, resolver configs.UserGroupResolver) *UserGroupCache {
+	t.Helper()
+	stopUserGroupCacheIfRunning()
+
+	var access LdapAccess = &LdapAccessMock{}
+	if resolver.Type == Ldap {
+		configs.SetConfigMap(validLdapExtraConfig())
+		access = ldapAccessForUserGroupTests()
+	}
+
+	cache := GetUserGroupCache(resolver, &LdapConfigurerMock{}, access)
+	t.Cleanup(func() {
+		cache.Stop()
+		configs.SetConfigMap(map[string]string{})
+	})
+	return cache
+}
+
 func TestGetUserGroupCache(t *testing.T) {
+	// All resolver types: this test only checks cache construction, empty initial state, and Stop().
+	// No GetUserGroup lookups are performed, so OS users and LDAP config are not required.
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -96,8 +136,7 @@ func TestGetUserGroupCache(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Get the cache with the resolver set
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			assert.Assert(t, testCache != nil, "Cache create failed")
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
 
@@ -113,9 +152,11 @@ func TestGetUserGroupCache(t *testing.T) {
 	}
 }
 
-// Tests for the LDAP resolver using the mock implementation
-
 func TestGetUserGroup(t *testing.T) {
+	// TestResolver: expectations are defined by the in-process test mock users (testuser1, etc.).
+	// LdapResolver: same lookup expectations are met via validLdapExtraConfig() and ldapAccessForUserGroupTests().
+	// OsResolver and UnknownResolver are omitted: OS lookups depend on local accounts; the unknown resolver
+	// does not resolve groups and does not fail lookups the way these assertions require.
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -125,14 +166,6 @@ func TestGetUserGroup(t *testing.T) {
 			resolver: testResolver,
 		},
 		{
-			name:     "OsResolver",
-			resolver: osResolver,
-		},
-		{
-			name:     "UnknownResolver",
-			resolver: unknownResolver,
-		},
-		{
 			name:     "LdapResolver",
 			resolver: ldapResolver,
 		},
@@ -140,7 +173,7 @@ func TestGetUserGroup(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			testCache.resetCache()
 			// test cache should be empty now
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
@@ -178,6 +211,8 @@ func TestGetUserGroup(t *testing.T) {
 }
 
 func TestBrokenUserGroup(t *testing.T) {
+	// TestResolver only: scenarios such as primary group "100", invalid-gid-user, and partial group
+	// resolution are specific to the test mock; LDAP and other resolvers do not reproduce them.
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -186,23 +221,11 @@ func TestBrokenUserGroup(t *testing.T) {
 			name:     "TestResolver",
 			resolver: testResolver,
 		},
-		{
-			name:     "OsResolver",
-			resolver: osResolver,
-		},
-		{
-			name:     "UnknownResolver",
-			resolver: unknownResolver,
-		},
-		{
-			name:     "LdapResolver",
-			resolver: ldapResolver,
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			testCache.resetCache()
 			// test cache should be empty now
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
@@ -248,6 +271,8 @@ func TestBrokenUserGroup(t *testing.T) {
 }
 
 func TestGetUserGroupFail(t *testing.T) {
+	// TestResolver only: asserts failed lookups, empty UserGroup fields, and negative-cache behaviour
+	// for unknown users; OS and unknown resolvers do not fail or populate results the same way.
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -256,23 +281,11 @@ func TestGetUserGroupFail(t *testing.T) {
 			name:     "TestResolver",
 			resolver: testResolver,
 		},
-		{
-			name:     "OsResolver",
-			resolver: osResolver,
-		},
-		{
-			name:     "UnknownResolver",
-			resolver: unknownResolver,
-		},
-		{
-			name:     "LdapResolver",
-			resolver: ldapResolver,
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			testCache.resetCache()
 			// test cache should be empty now
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
@@ -314,6 +327,9 @@ func TestGetUserGroupFail(t *testing.T) {
 }
 
 func TestCacheCleanUp(t *testing.T) {
+	// TestResolver and LdapResolver: both support successful lookups for testuser1/testuser2 and a failed
+	// lookup for "unknown", which this test uses to exercise manual cleanUpCache eviction timing.
+	// OsResolver and UnknownResolver are omitted for the same reasons as TestGetUserGroup.
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -323,14 +339,6 @@ func TestCacheCleanUp(t *testing.T) {
 			resolver: testResolver,
 		},
 		{
-			name:     "OsResolver",
-			resolver: osResolver,
-		},
-		{
-			name:     "UnknownResolver",
-			resolver: unknownResolver,
-		},
-		{
 			name:     "LdapResolver",
 			resolver: ldapResolver,
 		},
@@ -338,7 +346,7 @@ func TestCacheCleanUp(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			testCache.resetCache()
 			// test cache should be empty now
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
@@ -383,6 +391,8 @@ func TestCacheCleanUp(t *testing.T) {
 }
 
 func TestIntervalCacheCleanUp(t *testing.T) {
+	// TestResolver and LdapResolver: same lookup setup as TestCacheCleanUp; verifies the background
+	// cleaner goroutine evicts expired entries. OsResolver and UnknownResolver omitted (see TestGetUserGroup).
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -392,14 +402,6 @@ func TestIntervalCacheCleanUp(t *testing.T) {
 			resolver: testResolver,
 		},
 		{
-			name:     "OsResolver",
-			resolver: osResolver,
-		},
-		{
-			name:     "UnknownResolver",
-			resolver: unknownResolver,
-		},
-		{
 			name:     "LdapResolver",
 			resolver: ldapResolver,
 		},
@@ -407,7 +409,7 @@ func TestIntervalCacheCleanUp(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			testCache.resetCache()
 			// test cache should be empty now
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
@@ -445,6 +447,8 @@ func TestIntervalCacheCleanUp(t *testing.T) {
 }
 
 func TestConvertUGI(t *testing.T) {
+	// TestResolver and LdapResolver: ConvertUGI delegates to GetUserGroup when groups are absent, so the
+	// same mock users and LDAP fixtures apply. OsResolver and UnknownResolver omitted (see TestGetUserGroup).
 	testCases := []struct {
 		name     string
 		resolver configs.UserGroupResolver
@@ -454,14 +458,6 @@ func TestConvertUGI(t *testing.T) {
 			resolver: testResolver,
 		},
 		{
-			name:     "OsResolver",
-			resolver: osResolver,
-		},
-		{
-			name:     "UnknownResolver",
-			resolver: unknownResolver,
-		},
-		{
 			name:     "LdapResolver",
 			resolver: ldapResolver,
 		},
@@ -469,7 +465,7 @@ func TestConvertUGI(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			testCache := GetUserGroupCache(tc.resolver, &ConfigReaderMock{}, &LdapAccessMock{})
+			testCache := prepareUserGroupCache(t, tc.resolver)
 			testCache.resetCache()
 			// test cache should be empty now
 			assert.Equal(t, 0, testCache.getUGsize(), "Cache is not empty: %v", testCache.getUGmap())
@@ -547,7 +543,8 @@ func TestConvertUGI(t *testing.T) {
 // Without the Bug 1 fix (var now time.Time never assigned), now.Unix() always returns a
 // large negative constant so the eviction condition is never true and entries live forever.
 func TestCleanUpCacheUsesRealTime(t *testing.T) {
-	testCache := GetUserGroupCache(testResolver, &ConfigReaderMock{}, &LdapAccessMock{})
+	// TestResolver only: needs a successful testuser1 lookup to seed the cache before eviction is tested.
+	testCache := prepareUserGroupCache(t, testResolver)
 	testCache.resetCache()
 
 	_, err := testCache.GetUserGroup("testuser1")
@@ -570,7 +567,8 @@ func TestCleanUpCacheUsesRealTime(t *testing.T) {
 // whose positive cache entry has exceeded poscache seconds.
 // Without the Bug 2 fix, the stale entry is returned blindly regardless of age.
 func TestPositiveCacheHitExpiryTriggersRefresh(t *testing.T) {
-	testCache := GetUserGroupCache(testResolver, &ConfigReaderMock{}, &LdapAccessMock{})
+	// TestResolver only: relies on test mock group resolution for testuser1 and predictable re-resolution.
+	testCache := prepareUserGroupCache(t, testResolver)
 	testCache.resetCache()
 
 	_, err := testCache.GetUserGroup("testuser1")
